@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1060" font-family="Helvetica, Arial, sans-serif" font-size="12">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#333"/>
+    </marker>
+    <style>
+      .headertext { font-weight: bold; font-size: 14px; }
+      .box         { fill: #f3f6fb; stroke: #555; stroke-width: 1; }
+      .boxingest   { fill: #fff7e6; stroke: #b0691b; stroke-width: 1.2; }
+      .boxbus      { fill: #e6f7ff; stroke: #1890ff; stroke-width: 1.4; }
+      .boxanaly    { fill: #f9f0ff; stroke: #722ed1; stroke-width: 1; }
+      .boxstore    { fill: #fff0f6; stroke: #c41d7f; stroke-width: 1; }
+      .boxfusion   { fill: #f6ffed; stroke: #389e0d; stroke-width: 1; }
+      .boxexp      { fill: #fffbe6; stroke: #d4b106; stroke-width: 1; }
+      .boxout      { fill: #f0f5ffC0; stroke: #2f54eb; stroke-width: 1; }
+      .boxpersist  { fill: #fafafa; stroke: #8c8c8c; stroke-width: 1; stroke-dasharray: 5 3; }
+      .boxdash     { fill: #e6fffb; stroke: #13c2c2; stroke-width: 1; }
+      .arrow       { stroke: #333; stroke-width: 1.4; fill: none; marker-end: url(#arr); }
+      .edge        { stroke: #555; stroke-width: 1; fill: none; marker-end: url(#arr); }
+      .lane        { fill: none; stroke: #d0d7de; stroke-width: 1; stroke-dasharray: 4 4; }
+      .laneLabel   { font-size: 11px; fill: #6a737d; font-style: italic; }
+      .component   { }
+      .legend      { font-size: 11px; }
+      .title       { font-size: 20px; font-weight: bold; }
+      .subtitle    { font-size: 12px; fill: #6a737d; }
+    </style>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="36" class="title">Sherlock Candidate Identification — System Architecture</text>
+  <text x="40" y="54" class="subtitle">Real-time multi-signal evidence fusion · v1.0 · see docs/ARCHITECTURE.md</text>
+
+  <!-- Lane backgrounds (vertical) -->
+  <rect x="20"  y="70"  width="1280" height="170" class="lane" rx="8"/>
+  <rect x="20"  y="250" width="1280" height="80"  class="lane" rx="8"/>
+  <rect x="20"  y="340" width="1280" height="170" class="lane" rx="8"/>
+  <rect x="20"  y="520" width="1280" height="110" class="lane" rx="8"/>
+  <rect x="20"  y="640" width="1280" height="110" class="lane" rx="8"/>
+  <rect x="20"  y="760" width="1280" height="250" class="lane" rx="8"/>
+
+  <!-- Lane labels -->
+  <text x="36" y="86"  class="laneLabel">INGEST</text>
+  <text x="36" y="266" class="laneLabel">EVENT BUS</text>
+  <text x="36" y="356" class="laneLabel">ANALYZERS</text>
+  <text x="36" y="536" class="laneLabel">EVIDENCE STORE</text>
+  <text x="36" y="656" class="laneLabel">FUSION</text>
+  <text x="36" y="776" class="laneLabel">OUTPUT</text>
+
+  <!-- LANE 1: Ingest -->
+  <g>
+    <rect x="50"  y="110" width="160" height="120" rx="8" class="boxingest"/>
+    <text x="130" y="135" text-anchor="middle" class="headertext">Zoom Adapter</text>
+    <text x="130" y="155" text-anchor="middle">OAuth · Meeting API</text>
+    <text x="130" y="173" text-anchor="middle">Recording (multi-track)</text>
+    <text x="130" y="191" text-anchor="middle">Transcript API</text>
+    <text x="130" y="209" text-anchor="middle">Emits Event[]</text>
+
+    <rect x="240" y="110" width="160" height="120" rx="8" class="boxingest"/>
+    <text x="320" y="135" text-anchor="middle" class="headertext">Meet Adapter</text>
+    <text x="320" y="155" text-anchor="middle">Recording API + Drive</text>
+    <text x="320" y="173" text-anchor="middle">Chrome ext (fallback)</text>
+    <text x="320" y="191" text-anchor="middle">Per-track Whisper STT</text>
+    <text x="320" y="209" text-anchor="middle">Emits Event[]</text>
+
+    <rect x="430" y="110" width="160" height="120" rx="8" class="boxingest"/>
+    <text x="510" y="135" text-anchor="middle" class="headertext">Mock Adapter</text>
+    <text x="510" y="155" text-anchor="middle">Replays JSON files</text>
+    <text x="510" y="173" text-anchor="middle">from /data/recordings</text>
+    <text x="510" y="191" text-anchor="middle">Deterministic timing</text>
+    <text x="510" y="209" text-anchor="middle">Used in tests + demo</text>
+
+    <rect x="620" y="110" width="160" height="120" rx="8" class="boxingest" stroke-dasharray="4 4"/>
+    <text x="700" y="135" text-anchor="middle" class="headertext">Teams (future)</text>
+    <text x="700" y="155" text-anchor="middle">Microsoft Graph</text>
+    <text x="700" y="173" text-anchor="middle">same Event contract</text>
+    <text x="700" y="191" text-anchor="middle">out of v1 scope</text>
+  </g>
+
+  <!-- Arrows: ingest → bus -->
+  <path d="M 130 230 L 130 280 L 200 280" class="arrow"/>
+  <path d="M 320 230 L 320 280 L 450 280" class="arrow"/>
+  <path d="M 510 230 L 510 280 L 575 280" class="arrow"/>
+  <path d="M 700 230 L 700 280 L 660 280" class="arrow" stroke-dasharray="4 4"/>
+
+  <!-- LANE 2: Event Bus -->
+  <g>
+    <rect x="200" y="260" width="800" height="60" rx="8" class="boxbus"/>
+    <text x="600" y="285" text-anchor="middle" class="headertext">EVENT BUS</text>
+    <text x="600" y="305" text-anchor="middle">asyncio.Queue (in-process) + Redis pub/sub (cross-process scale) · FIFO per-source, dedupe by (source, sequence)</text>
+  </g>
+
+  <!-- Arrows: bus → analyzers -->
+  <path d="M 600 320 L 600 360 L 130 360" class="arrow"/>
+  <path d="M 600 320 L 600 360 L 290 360" class="arrow"/>
+  <path d="M 600 320 L 600 360 L 450 360" class="arrow"/>
+  <path d="M 600 320 L 600 360 L 610 360" class="arrow"/>
+  <path d="M 600 320 L 600 360 L 770 360" class="arrow"/>
+  <path d="M 600 320 L 600 360 L 930 360" class="arrow"/>
+
+  <!-- LANE 3: Analyzers -->
+  <g>
+    <rect x="50"  y="370" width="160" height="120" rx="8" class="boxanaly"/>
+    <text x="130" y="395" text-anchor="middle" class="headertext">Metadata</text>
+    <text x="130" y="415" text-anchor="middle">name_similarity (0.15)</text>
+    <text x="130" y="432" text-anchor="middle">email_match (0.30)</text>
+    <text x="130" y="449" text-anchor="middle">device_name (0.00)</text>
+    <text x="130" y="468" text-anchor="middle">emits Evidence[]</text>
+
+    <rect x="240" y="370" width="160" height="120" rx="8" class="boxanaly"/>
+    <text x="320" y="395" text-anchor="middle" class="headertext">Audio / Behavior</text>
+    <text x="320" y="415" text-anchor="middle">speaking_pattern (0.15)</text>
+    <text x="320" y="432" text-anchor="middle">speaking_ratio (0.00)</text>
+    <text x="320" y="449" text-anchor="middle">join_order (0.05)</text>
+    <text x="320" y="468" text-anchor="middle">emits Evidence[]</text>
+
+    <rect x="430" y="370" width="160" height="120" rx="8" class="boxanaly"/>
+    <text x="510" y="395" text-anchor="middle" class="headertext">Transcript (LLM)</text>
+    <text x="510" y="415" text-anchor="middle">transcript_role (0.25)</text>
+    <text x="510" y="432" text-anchor="middle">Qwen / GPT-4.1-mini</text>
+    <text x="510" y="449" text-anchor="middle">60s sliding window</text>
+    <text x="510" y="468" text-anchor="middle">emits Evidence[]</text>
+
+    <rect x="620" y="370" width="160" height="120" rx="8" class="boxanaly"/>
+    <text x="700" y="395" text-anchor="middle" class="headertext">Vision</text>
+    <text x="700" y="415" text-anchor="middle">face_consistency (0.00)</text>
+    <text x="700" y="432" text-anchor="middle">MediaPipe + InsightFace</text>
+    <text x="700" y="449" text-anchor="middle">consistency ≠ recognition</text>
+    <text x="700" y="468" text-anchor="middle">emits Evidence[]</text>
+
+    <rect x="810" y="370" width="160" height="120" rx="8" class="boxanaly"/>
+    <text x="890" y="395" text-anchor="middle" class="headertext">Screen Share</text>
+    <text x="890" y="415" text-anchor="middle">screen_share_content (0.05)</text>
+    <text x="890" y="432" text-anchor="middle">CLIP zero-shot</text>
+    <text x="890" y="449" text-anchor="middle">resume / IDE / browser</text>
+    <text x="890" y="468" text-anchor="middle">emits Evidence[]</text>
+
+    <rect x="1000" y="370" width="160" height="120" rx="8" class="boxanaly"/>
+    <text x="1080" y="395" text-anchor="middle" class="headertext">Webcam</text>
+    <text x="1080" y="415" text-anchor="middle">webcam_usage (0.05)</text>
+    <text x="1080" y="432" text-anchor="middle">on-ratio over time</text>
+    <text x="1080" y="449" text-anchor="middle">sticky score</text>
+    <text x="1080" y="468" text-anchor="middle">emits Evidence[]</text>
+  </g>
+
+  <!-- Arrows: analyzers → evidence store -->
+  <path d="M 130 490 L 130 540 L 600 540" class="edge"/>
+  <path d="M 320 490 L 320 540 L 600 540" class="edge"/>
+  <path d="M 510 490 L 510 540 L 600 540" class="edge"/>
+  <path d="M 700 490 L 700 540 L 600 540" class="edge"/>
+  <path d="M 890 490 L 890 540 L 600 540" class="edge"/>
+  <path d="M 1080 490 L 1080 540 L 600 540" class="edge"/>
+
+  <!-- LANE 4: Evidence Store -->
+  <g>
+    <rect x="280" y="530" width="640" height="90" rx="8" class="boxstore"/>
+    <text x="600" y="556" text-anchor="middle" class="headertext">EVIDENCE STORE  ·  Redis</text>
+    <text x="600" y="576" text-anchor="middle">Key: (session_id, participant_id, feature)   ·   supersedes mechanism removes stale per feature   ·   24h TTL</text>
+    <text x="600" y="596" text-anchor="middle">Durable copy → PostgreSQL every 60s for tune.py calibration audit</text>
+  </g>
+
+  <!-- Arrow: evidence store → ticker -->
+  <path d="M 600 620 L 600 660" class="arrow"/>
+
+  <!-- LANE 5: Fusion -->
+  <g>
+    <rect x="50"  y="650" width="320" height="90" rx="8" class="boxfusion"/>
+    <text x="210" y="675" text-anchor="middle" class="headertext">REALTIME TICKER</text>
+    <text x="210" y="695" text-anchor="middle">asyncio task, fires every 5s per session</text>
+    <text x="210" y="713" text-anchor="middle">runs analyzer.on_tick + fuse + decide</text>
+    <text x="210" y="731" text-anchor="middle">publishes Verdict to WebSocket</text>
+
+    <rect x="420" y="650" width="320" height="90" rx="8" class="boxfusion"/>
+    <text x="580" y="675" text-anchor="middle" class="headertext">FUSION ENGINE</text>
+    <text x="580" y="695" text-anchor="middle">v1-weighted: Σ(w·s·decay) / Σ(w·decay)</text>
+    <text x="580" y="713" text-anchor="middle">v2-bayesian (after tune.py): beta priors</text>
+    <text x="580" y="731" text-anchor="middle">threshold=0.55  ·  margin=0.20</text>
+
+    <rect x="790" y="650" width="320" height="90" rx="8" class="boxexp"/>
+    <text x="950" y="675" text-anchor="middle" class="headertext">EXPLAINER</text>
+    <text x="950" y="695" text-anchor="middle">renders Evidence log → bullet reasons</text>
+    <text x="950" y="713" text-anchor="middle">top-7 contributions + rejected hypotheses</text>
+    <text x="950" y="731" text-anchor="middle">PII regex redaction</text>
+  </g>
+
+  <!-- Arrows within fusion lane -->
+  <path d="M 370 695 L 420 695" class="arrow"/>
+  <path d="M 740 695 L 790 695" class="arrow"/>
+
+  <!-- Arrow: fusion → output -->
+  <path d="M 950 740 L 950 780" class="arrow"/>
+
+  <!-- LANE 6: Output -->
+  <g>
+    <rect x="50"  y="770" width="280" height="120" rx="8" class="boxout"/>
+    <text x="190" y="795" text-anchor="middle" class="headertext">ParticipantState Store</text>
+    <text x="190" y="815" text-anchor="middle">Redis · per (session, participant)</text>
+    <text x="190" y="833" text-anchor="middle">confidence, raw_evidence, provenance</text>
+    <text x="190" y="851" text-anchor="middle">rewritten every 5s</text>
+    <text x="190" y="875" text-anchor="middle">presence fade after LEAVE: 30s</text>
+
+    <rect x="360" y="770" width="280" height="120" rx="8" class="boxout"/>
+    <text x="500" y="795" text-anchor="middle" class="headertext">WebSocket Server</text>
+    <text x="500" y="815" text-anchor="middle">FastAPI native</text>
+    <text x="500" y="833" text-anchor="middle">/sessions/{id}/stream</text>
+    <text x="500" y="851" text-anchor="middle">push Verdict every 5s</text>
+    <text x="500" y="875" text-anchor="middle">multi-client subscriptions</text>
+
+    <rect x="670" y="770" width="280" height="120" rx="8" class="boxpersist"/>
+    <text x="810" y="795" text-anchor="middle" class="headertext">Postgres Audit</text>
+    <text x="810" y="815" text-anchor="middle">sessions · verdicts · evidence</text>
+    <text x="810" y="833" text-anchor="middle">labeled data for tune.py</text>
+    <text x="810" y="851" text-anchor="middle">confidence timeline</text>
+    <text x="810" y="875" text-anchor="middle">24h-TTL durable</text>
+
+    <rect x="980" y="770" width="240" height="120" rx="8" class="boxdash"/>
+    <text x="1100" y="795" text-anchor="middle" class="headertext">React Dashboard</text>
+    <text x="1100" y="815" text-anchor="middle">verdict card + reason panel</text>
+    <text x="1100" y="833" text-anchor="middle">per-participant conf. timeline</text>
+    <text x="1100" y="851" text-anchor="middle">"still deciding" UX state</text>
+    <text x="1100" y="875" text-anchor="middle">Recharts</text>
+  </g>
+
+  <!-- Arrows in output lane -->
+  <path d="M 330 830 L 360 830" class="arrow"/>
+  <path d="M 640 830 L 670 830" class="arrow"/>
+  <path d="M 950 695 L 1100 695 L 1100 770" class="arrow"/>
+  <path d="M 500 890 L 500 930 L 1100 930 L 1100 890" class="arrow"/>
+
+  <!-- Legend -->
+  <g transform="translate(50, 960)">
+    <rect x="0"   y="0" width="22" height="14" class="boxingest"/>
+    <text x="30" y="11" class="legend">Ingest</text>
+    <rect x="90"  y="0" width="22" height="14" class="boxbus"/>
+    <text x="120" y="11" class="legend">Event Bus</text>
+    <rect x="200" y="0" width="22" height="14" class="boxanaly"/>
+    <text x="230" y="11" class="legend">Analyzer</text>
+    <rect x="310" y="0" width="22" height="14" class="boxstore"/>
+    <text x="340" y="11" class="legend">Evidence Store</text>
+    <rect x="450" y="0" width="22" height="14" class="boxfusion"/>
+    <text x="480" y="11" class="legend">Fusion</text>
+    <rect x="540" y="0" width="22" height="14" class="boxexp"/>
+    <text x="570" y="11" class="legend">Explainer</text>
+    <rect x="640" y="0" width="22" height="14" class="boxout"/>
+    <text x="670" y="11" class="legend">Output Bus / State</text>
+    <rect x="800" y="0" width="22" height="14" class="boxpersist"/>
+    <text x="830" y="11" class="legend">Persistent Audit</text>
+    <rect x="940" y="0" width="22" height="14" class="boxdash"/>
+    <text x="970" y="11" class="legend">Dashboard</text>
+  </g>
+
+  <!-- Footnote -->
+  <text x="1280" y="1030" text-anchor="end" class="subtitle">Deliverable #4 from the Sherlock Internship Challenge PDF · generated from docs/ARCHITECTURE.md</text>
+</svg>
