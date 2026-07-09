@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import json
+import os
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 
 from app.ingest.meet import MeetAdapter
+from app.ingest.zoom import ZoomAdapter, handle_url_validation, verify_webhook_signature
 
 app = FastAPI(title="cis")
 
-# Minimal in-memory registry mapping session_id -> MeetAdapter. Intentionally
-# simple -- a real session manager is Phase 8's fuller bootstrap concern.
-# Populated by whoever starts a Meet session (out of scope here); tests
-# populate it directly.
+# Minimal in-memory registries. Intentionally simple -- a real session
+# manager is Phase 8's fuller bootstrap concern. Populated by whoever starts
+# a session (out of scope here); tests populate them directly.
 meet_adapters: dict[str, MeetAdapter] = {}
+zoom_adapters: dict[str, ZoomAdapter] = {}  # keyed by Zoom meeting_id
 
 
 @app.get("/health")
@@ -60,3 +63,33 @@ async def meet_capture(websocket: WebSocket, session_id: str) -> None:
                 pending_audio_meta = None
     except WebSocketDisconnect:
         pass
+
+
+@app.post("/zoom/webhook")
+async def zoom_webhook(request: Request) -> JSONResponse:
+    """Receives signed Zoom webhook events per docs/PLATFORM_INTEGRATION.md §2.2.
+
+    Zoom's `endpoint.url_validation` handshake (sent once, during webhook
+    setup) predates any secret being exchanged in-band and is answered
+    without signature verification, per Zoom's own documented flow.
+    """
+    raw_body = await request.body()
+    payload = json.loads(raw_body)
+
+    if payload.get("event") == "endpoint.url_validation":
+        secret_token = os.environ.get("ZOOM_WEBHOOK_SECRET_TOKEN", "")
+        plain_token = payload["payload"]["plainToken"]
+        return JSONResponse(handle_url_validation(plain_token, secret_token))
+
+    secret_token = os.environ.get("ZOOM_WEBHOOK_SECRET_TOKEN", "")
+    signature = request.headers.get("x-zm-signature", "")
+    timestamp = request.headers.get("x-zm-request-timestamp", "")
+    if not verify_webhook_signature(secret_token, timestamp, raw_body, signature):
+        return JSONResponse({"error": "invalid signature"}, status_code=401)
+
+    meeting_id = str(payload.get("payload", {}).get("object", {}).get("id", ""))
+    adapter = zoom_adapters.get(meeting_id)
+    if adapter is not None:
+        await adapter.push_webhook_event(payload)
+
+    return JSONResponse({"status": "ok"})
