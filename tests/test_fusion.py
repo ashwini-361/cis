@@ -6,9 +6,10 @@ import asyncio
 
 import pytest
 
-from app.fusion.engine import apply_supersedes, fuse
+from app.explain.generator import Explainer
+from app.fusion.engine import apply_supersedes, decide, fuse
 from app.realtime.ticker import ticker
-from app.schema import Evidence, ParticipantState
+from app.schema import Evidence, ParticipantState, RejectedHypothesis, Verdict
 from app.store.state import ParticipantStateStore
 
 
@@ -130,6 +131,123 @@ def test_apply_supersedes_drops_older_same_participant_feature() -> None:
     assert other_participant in result
 
 
+def test_explainer_render_top_reasons_and_rejected_hypothesis() -> None:
+    top_evidence = [
+        Evidence(
+            session_id="s", participant_id="P1", feature="email_match", source="metadata_analyzer",
+            score=1.0, weight=0.30, reason="Email matched calendar metadata", ts=0.0,
+        ),
+        Evidence(
+            session_id="s", participant_id="P1", feature="join_order", source="join_order_analyzer",
+            score=0.5, weight=0.05, reason="Joined first", ts=0.0,
+        ),
+        Evidence(
+            session_id="s", participant_id="P1", feature="webcam_usage", source="webcam_analyzer",
+            score=0.0, weight=0.05, reason="Webcam never active", ts=0.0,
+        ),
+    ]
+    top_state = ParticipantState(
+        session_id="s", participant_id="P1", display_name="Ashwini", join_ts=0.0,
+        confidence=0.9, raw_evidence=top_evidence,
+    )
+    runner_evidence = [
+        Evidence(
+            session_id="s", participant_id="P3", feature="transcript_role",
+            source="transcript_role_analyzer", score=0.1, weight=0.25,
+            reason="Transcript indicates interviewer", ts=0.0,
+        ),
+    ]
+    runner_state = ParticipantState(
+        session_id="s", participant_id="P3", display_name="Priya", join_ts=0.0,
+        confidence=0.2, raw_evidence=runner_evidence,
+    )
+
+    reasons, rejected = Explainer().render(top_state, runner_state)
+
+    assert reasons[0] == "Email matched calendar metadata (+0.300)"
+    # zero-contribution evidence is excluded
+    assert all("Webcam never active" not in r for r in reasons)
+    assert rejected == [
+        RejectedHypothesis(
+            participant_id="P3",
+            display_name="Priya",
+            confidence=0.2,
+            top_negative_reasons=["Transcript indicates interviewer"],
+        )
+    ]
+
+
+def test_explainer_render_no_runner_up() -> None:
+    top_state = ParticipantState(
+        session_id="s", participant_id="P1", display_name="Ashwini", join_ts=0.0, confidence=0.9,
+    )
+    reasons, rejected = Explainer().render(top_state, None)
+    assert reasons == []
+    assert rejected == []
+
+
+def test_decide_no_participants_returns_not_deciding() -> None:
+    verdict = decide("sess_1", "mock", [], t=0.0, explainer=Explainer())
+    assert verdict.is_decision is False
+    assert verdict.not_deciding_reason == "no participants"
+    assert verdict.candidate_id is None
+
+
+def test_decide_below_threshold_returns_not_deciding() -> None:
+    state = ParticipantState(
+        session_id="sess_1", participant_id="P1", display_name="Ashwini", join_ts=0.0,
+        confidence=0.42,
+    )
+    verdict = decide("sess_1", "mock", [state], t=12.3, explainer=Explainer())
+    assert verdict.is_decision is False
+    assert "threshold" in verdict.not_deciding_reason
+    assert verdict.candidate_id is None
+
+
+def test_decide_margin_too_small_returns_not_deciding() -> None:
+    top = ParticipantState(
+        session_id="sess_1", participant_id="P1", display_name="Ashwini", join_ts=0.0,
+        confidence=0.60,
+    )
+    runner = ParticipantState(
+        session_id="sess_1", participant_id="P3", display_name="Priya", join_ts=0.0,
+        confidence=0.55,
+    )
+    verdict = decide("sess_1", "mock", [top, runner], t=0.0, explainer=Explainer())
+    assert verdict.is_decision is False
+    assert "margin" in verdict.not_deciding_reason
+
+
+def test_decide_decidable_verdict_uses_explainer() -> None:
+    top_evidence = [
+        Evidence(
+            session_id="sess_1", participant_id="P1", feature="email_match",
+            source="metadata_analyzer", score=1.0, weight=0.30,
+            reason="Email matched calendar metadata", ts=0.0,
+        ),
+    ]
+    top = ParticipantState(
+        session_id="sess_1", participant_id="P1", display_name="Ashwini", join_ts=0.0,
+        confidence=0.97, raw_evidence=top_evidence,
+    )
+    runner = ParticipantState(
+        session_id="sess_1", participant_id="P3", display_name="Priya", join_ts=0.0,
+        confidence=0.45,
+    )
+    verdict = decide("sess_1", "zoom", [top, runner], t=300.4, explainer=Explainer())
+
+    assert verdict.is_decision is True
+    assert verdict.candidate_id == "P1"
+    assert verdict.candidate_name == "Ashwini"
+    assert verdict.confidence == pytest.approx(0.97)
+    assert verdict.runner_up_id == "P3"
+    assert verdict.margin == pytest.approx(0.52)
+    assert verdict.reasons == ["Email matched calendar metadata (+0.300)"]
+    assert len(verdict.rejected_hypotheses) == 1
+    assert verdict.analyzer_count == 1
+    assert verdict.total_evidence == 1
+
+
 async def test_participant_state_store_in_memory_roundtrip() -> None:
     store = ParticipantStateStore()
     state = ParticipantState(
@@ -173,13 +291,21 @@ async def test_ticker_recomputes_on_each_tick() -> None:
     async def get_evidences(participant_id: str) -> list[Evidence]:
         return [evidence]
 
+    broadcast_calls: list[Verdict] = []
+
+    async def broadcast(verdict: Verdict) -> None:
+        broadcast_calls.append(verdict)
+
     state_store = ParticipantStateStore()
     await ticker(
         session_id="sess_1",
+        platform="mock",
         participant_ids=["P1"],
         get_evidences=get_evidences,
         state_store=state_store,
         stop_event=stop_event,
+        explainer=Explainer(),
+        broadcast=broadcast,
         clock=clock,
         sleep_fn=sleep_fn,
         interval=5.0,
@@ -191,3 +317,6 @@ async def test_ticker_recomputes_on_each_tick() -> None:
     assert state.confidence == pytest.approx(fuse([evidence], clock_value))
     assert state.last_recompute_ts == clock_value
     assert state.total_evidence == 1
+
+    assert len(broadcast_calls) == 3
+    assert broadcast_calls[-1].session_id == "sess_1"

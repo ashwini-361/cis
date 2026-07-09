@@ -9,14 +9,15 @@ from fastapi.responses import JSONResponse
 
 from app.ingest.meet import MeetAdapter
 from app.ingest.zoom import ZoomAdapter, handle_url_validation, verify_webhook_signature
+from app.session import SessionManager
 
 app = FastAPI(title="cis")
 
-# Minimal in-memory registries. Intentionally simple -- a real session
-# manager is Phase 8's fuller bootstrap concern. Populated by whoever starts
-# a session (out of scope here); tests populate them directly.
-meet_adapters: dict[str, MeetAdapter] = {}
-zoom_adapters: dict[str, ZoomAdapter] = {}  # keyed by Zoom meeting_id
+# Consolidated per-session state (Phase 8) -- replaces the separate
+# meet_adapters/zoom_adapters dicts from Phases 7a/7b. Populated by whoever
+# starts a session (out of scope here); tests populate it directly via
+# session_manager.create_session(...) + setting .ingest_adapter.
+session_manager = SessionManager()
 
 
 @app.get("/health")
@@ -32,9 +33,10 @@ async def meet_capture(websocket: WebSocket, session_id: str) -> None:
     text frames; each audio chunk is a JSON `audio_chunk_meta` text frame
     immediately followed by one binary frame carrying the raw audio bytes.
     """
-    adapter = meet_adapters.get(session_id)
+    session = session_manager.get_session(session_id)
+    adapter = session.ingest_adapter if session is not None else None
     await websocket.accept()
-    if adapter is None:
+    if not isinstance(adapter, MeetAdapter):
         await websocket.close(code=4404, reason="unknown session_id")
         return
 
@@ -88,8 +90,38 @@ async def zoom_webhook(request: Request) -> JSONResponse:
         return JSONResponse({"error": "invalid signature"}, status_code=401)
 
     meeting_id = str(payload.get("payload", {}).get("object", {}).get("id", ""))
-    adapter = zoom_adapters.get(meeting_id)
-    if adapter is not None:
+    session = session_manager.get_session(meeting_id)
+    adapter = session.ingest_adapter if session is not None else None
+    if isinstance(adapter, ZoomAdapter):
         await adapter.push_webhook_event(payload)
 
     return JSONResponse({"status": "ok"})
+
+
+@app.websocket("/sessions/{session_id}/stream")
+async def session_stream(websocket: WebSocket, session_id: str) -> None:
+    """Outbound verdict stream for the dashboard, per docs/ARCHITECTURE.md §1.8.
+
+    Verdicts arrive via SessionManager.broadcast_verdict (called by the
+    realtime ticker each tick) -- this route never reads anything meaningful
+    from the client, it just holds the connection open and pushes.
+    """
+    await websocket.accept()
+    session = session_manager.get_session(session_id)
+    if session is None:
+        await websocket.close(code=4404, reason="unknown session_id")
+        return
+
+    if session.latest_verdict is not None:
+        await websocket.send_json(session.latest_verdict.model_dump(mode="json"))
+    session_manager.add_subscriber(session_id, websocket)
+
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        session_manager.remove_subscriber(session_id, websocket)

@@ -8,8 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ingest.meet import MeetAdapter, SegmentDict
-from app.main import app, meet_adapters
-from app.schema import EventType, SessionEnvelope
+from app.main import app, session_manager
+from app.schema import DecayConfig, EventType, SessionEnvelope, WeightTable
+
+_WEIGHT_TABLE = WeightTable(
+    version="1.0.0", fusion_engine="v1-weighted", threshold=0.55, margin=0.20,
+    decay=DecayConfig(), weights={},
+)
 
 
 class FakeTranscriber:
@@ -93,7 +98,8 @@ async def test_audio_buffers_until_30s_then_transcribes() -> None:
 
 def test_websocket_route_dispatches_control_and_audio() -> None:
     adapter = MeetAdapter(FakeTranscriber([]))
-    meet_adapters["ws-test-session"] = adapter
+    session = session_manager.create_session("ws-test-session", _WEIGHT_TABLE)
+    session.ingest_adapter = adapter
 
     received_control: list[dict[str, Any]] = []
     received_audio: list[tuple[str, bytes]] = []
@@ -129,7 +135,7 @@ def test_websocket_route_dispatches_control_and_audio() -> None:
             )
             ws.send_bytes(b"opus-bytes")
     finally:
-        del meet_adapters["ws-test-session"]
+        session_manager.remove_session("ws-test-session")
 
     assert received_control == [
         {"type": "WEBCAM_ON", "ts": 2.0, "payload": {"participant_id": "P1"}}

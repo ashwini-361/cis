@@ -20,8 +20,13 @@ from app.ingest.zoom import (
     map_webhook_event,
     verify_webhook_signature,
 )
-from app.main import app, zoom_adapters
-from app.schema import EventType, SessionEnvelope
+from app.main import app, session_manager
+from app.schema import DecayConfig, EventType, SessionEnvelope, WeightTable
+
+_WEIGHT_TABLE = WeightTable(
+    version="1.0.0", fusion_engine="v1-weighted", threshold=0.55, margin=0.20,
+    decay=DecayConfig(), weights={},
+)
 
 
 class FakeTokenStore:
@@ -240,20 +245,19 @@ def test_webhook_route_rejects_bad_signature(monkeypatch: pytest.MonkeyPatch) ->
     assert response.status_code == 401
 
 
-class _DummyAdapter:
-    def __init__(self) -> None:
-        self.received: list[dict[str, Any]] = []
-
-    async def push_webhook_event(self, zoom_event: dict[str, Any]) -> None:
-        self.received.append(zoom_event)
-
-
 def test_webhook_route_accepts_valid_signature_and_dispatches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ZOOM_WEBHOOK_SECRET_TOKEN", "s3cr3t")
-    adapter = _DummyAdapter()
-    zoom_adapters["42"] = adapter  # type: ignore[assignment]
+    received: list[dict[str, Any]] = []
+
+    async def fake_push_webhook_event(zoom_event: dict[str, Any]) -> None:
+        received.append(zoom_event)
+
+    adapter = ZoomAdapter(api_client=None, transcriber=None)  # type: ignore[arg-type]
+    adapter.push_webhook_event = fake_push_webhook_event  # type: ignore[method-assign]
+    session = session_manager.create_session("42", _WEIGHT_TABLE)
+    session.ingest_adapter = adapter
 
     body = json.dumps(
         {
@@ -283,7 +287,7 @@ def test_webhook_route_accepts_valid_signature_and_dispatches(
             },
         )
     finally:
-        del zoom_adapters["42"]
+        session_manager.remove_session("42")
 
     assert response.status_code == 200
-    assert len(adapter.received) == 1
+    assert len(received) == 1
