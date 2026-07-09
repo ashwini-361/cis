@@ -1,0 +1,95 @@
+{
+  "version": "1.0.0",
+  "scenario_id": "happy_path",
+  "platform": "mock",
+  "session": {
+    "session_id": "mock-sess-001",
+    "platform": "mock",
+    "start_wall_clock": "2026-07-09T09:30:00Z",
+    "expected_duration_min": 30,
+    "expected_participants": ["P1", "P2", "P3"],
+    "ground_truth_candidate_id": "P1",
+    "notes": "Happy-path scenario: email match + transcript Q&A pattern."
+  },
+  "metadata": {
+    "candidate": {
+      "name": "Ashwini Kumar",
+      "email": "ashwini.kumar@gmail.com"
+    },
+    "interviewers": [
+      { "name": "Priya Sharma", "email": "priya@acme.corp" }
+    ],
+    "schedule": {
+      "start_wall_clock": "2026-07-09T09:30:00Z",
+      "expected_duration_min": 30,
+      "calendar_invite_id": "evt_mock_1"
+    }
+  },
+  "participants": [
+    {
+      "participant_id": "P1",
+      "display_name": "Ashwini",
+      "email": "ashwini.kumar@gmail.com",
+      "device_name": null,
+      "join_order": 1,
+      "join_ts": 1.1,
+      "leave_ts": 1800.0
+    },
+    {
+      "participant_id": "P2",
+      "display_name": "MacBook Pro",
+      "email": null,
+      "device_name": "MacBook Pro",
+      "join_order": 2,
+      "join_ts": 12.7,
+      "leave_ts": 1800.0
+    },
+    {
+      "participant_id": "P3",
+      "display_name": "Priya Sharma",
+      "email": "priya@acme.corp",
+      "device_name": null,
+      "join_order": 3,
+      "join_ts": 30.4,
+      "leave_ts": 1800.0
+    }
+  ],
+  "events": [
+    { "type": "PARTICIPANT_JOINED", "ts": 1.1, "payload": { "participant_id": "P1", "display_name": "Ashwini", "email": "ashwini.kumar@gmail.com", "device_name": null, "join_order": 1 } },
+    { "type": "WEBCAM_ON", "ts": 2.5, "payload": { "participant_id": "P1" } },
+    { "type": "PARTICIPANT_JOINED", "ts": 12.7, "payload": { "participant_id": "P2", "display_name": "MacBook Pro", "email": null, "device_name": "MacBook Pro", "join_order": 2 } },
+    { "type": "PARTICIPANT_JOINED", "ts": 30.4, "payload": { "participant_id": "P3", "display_name": "Priya Sharma", "email": "priya@acme.corp", "device_name": null, "join_order": 3 } },
+    { "type": "WEBCAM_ON", "ts": 30.5, "payload": { "participant_id": "P3" } },
+    { "type": "SCREEN_SHARE_START", "ts": 120.0, "payload": { "participant_id": "P1", "content_label": "code editor / IDE" } },
+    { "type": "SCREEN_SHARE_STOP", "ts": 240.0, "payload": { "participant_id": "P1" } },
+    { "type": "PARTICIPANT_LEFT", "ts": 1800.0, "payload": { "participant_id": "P1", "leave_ts": 1800.0 } },
+    { "type": "PARTICIPANT_LEFT", "ts": 1800.0, "payload": { "participant_id": "P2", "leave_ts": 1800.0 } },
+    { "type": "PARTICIPANT_LEFT", "ts": 1800.0, "payload": { "participant_id": "P3", "leave_ts": 1800.0 } }
+  ],
+  "transcript_segments": [
+    { "participant_id": "P3", "text": "Hi Ashwini, thanks for jumping on. Tell me about yourself.", "start_sec": 65.0, "end_sec": 70.0 },
+    { "participant_id": "P1", "text": "Sure. I'm a backend engineer with three years of experience, mostly in async Python...", "start_sec": 71.0, "end_sec": 90.0 },
+    { "participant_id": "P3", "text": "Great. Why this company?", "start_sec": 91.5, "end_sec": 93.0 },
+    { "participant_id": "P1", "text": "I'm drawn to the focus on fraud detection in real-time...", "start_sec": 93.5, "end_sec": 110.0 },
+    { "participant_id": "P3", "text": "Walk me through your most recent project.", "start_sec": 120.5, "end_sec": 124.0 },
+    { "participant_id": "P1", "text": "I built Astra, a document search pipeline...", "start_sec": 125.0, "end_sec": 175.0 },
+    { "participant_id": "P3", "text": "What scale did you test that at?", "start_sec": 180.0, "end_sec": 182.0 },
+    { "participant_id": "P1", "text": "About 50k documents per query batch, p95 latency under 400ms.", "start_sec": 183.0, "end_sec": 200.0 },
+    { "participant_id": "P3", "text": "Excellent. Any questions for me?", "start_sec": 320.0, "end_sec": 322.5 },
+    { "participant_id": "P1", "text": "Yes — what's the on-call rotation look like?", "start_sec": 325.0, "end_sec": 330.0 },
+    { "participant_id": "P3", "text": "One week every six weeks.", "start_sec": 332.0, "end_sec": 335.0 }
+  ],
+  "expected_output": {
+    "decision_ts": 200.0,
+    "is_decision": true,
+    "candidate_id": "P1",
+    "candidate_name": "Ashwini",
+    "min_confidence_at_decision": 0.85,
+    "max_confidence_runner_up": 0.45,
+    "reasons_includes_any_of": [
+      "Email matched calendar metadata",
+      "Display name similarity",
+      "Answered"
+    ]
+  }
+}
