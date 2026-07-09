@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "cis Meet Capturer",
+  "version": "0.1.0",
+  "description": "Captures per-participant audio and DOM participant state from a Google Meet call for the cis candidate-identification system.",
+  "permissions": ["tabCapture", "scripting", "offscreen", "activeTab", "storage"],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "ws://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["inject.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "cis Meet Capturer"
+  }
+}
