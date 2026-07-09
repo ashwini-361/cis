@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "fusion_engine": "v1-weighted",
+  "threshold": 0.55,
+  "margin": 0.20,
+  "decay": {
+    "default_half_life_sec": 300,
+    "per_feature": {
+      "transcript_role": 600,
+      "speaking_pattern": 300,
+      "name_similarity": null,
+      "email_match": null
+    }
+  },
+  "weights": {
+    "name_similarity": 0.15,
+    "email_match": 0.30,
+    "join_order": 0.05,
+    "webcam_usage": 0.05,
+    "speaking_pattern": 0.15,
+    "transcript_role": 0.25,
+    "speaking_ratio": 0.00,
+    "face_consistency": 0.00,
+    "screen_share_content": 0.05,
+    "device_name": 0.00
+  }
+}
