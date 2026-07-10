@@ -216,21 +216,27 @@ Meet Capturer (Chrome MV3 extension)
 │     – emits PARTICIPANT_JOINED / LEFT / RENAMED
 │     – observes webcam indicator toggles (WEBCAM_ON / OFF) per tile
 │     – observes who's screen-sharing (SCREEN_SHARE_START / STOP)
+│     – scrapes captions/transcript DOM and emits best-effort transcript segments
+│     – emits diagnostic events when selectors fail or observers attach
 ├── background-script:
-│     – chrome.tabCapture capture per-participant audio via getUserMedia on
-│       each participants tile's audio element (Meet isolates streams by tile)
-│     – sends audio chunks via WebSocket to the cis app for Whisper STT
+│     – relays control / transcript / diagnostic messages to the offscreen doc
+│     – falls back to tabCapture when per-track WebRTC audio is absent
+├── offscreen document:
+│     – owns the WebSocket to the cis app (`/meet/{session_id}/capture`)
+│     – buffers and forwards audio chunks, transcript frames, and diagnostics
 └── popup UI:
-      – host picks which Meet to capture + acts as the host of the cis app
+│      – host picks the session ID and backend URL (`http://localhost:8000` in dev)
 ```
+
+The implementation intentionally follows proven open-source MV3 extension patterns instead of inventing capture plumbing from scratch: service-worker orchestration only, an offscreen document that owns the recorder/WebSocket lifecycle, page-world `RTCPeerConnection` interception for best-effort per-track capture, and `tabCapture` as the fallback when per-track interception is unavailable.
 
 The extension is distributed as an unpacked extension for the demo; not published to the Chrome Web Store for v1.0. The demo video will use a Hiring Manager persona who is also the extension operator.
 
 ### 3.4 Per-track Whisper via extension
 
-The extension exposes the per-participant `MediaStreamTrack` directly via `RTCPeerConnection.ontrack` inspection (Meet uses WebRTC internally — we can introspect the remote SDP). Once we have one MediaStream per participant (Mute state tracked), we capture each into an `AudioWorkletProcessor`, encode to Opus via `MediaRecorder`, and chunk-by-chunk send into `ws://localhost:3000/audio/{participant_id}` — handled by the Meet adapter.
+The extension exposes the per-participant `MediaStreamTrack` directly via `RTCPeerConnection.ontrack` inspection (Meet uses WebRTC internally — we can introspect the remote SDP). Once we have one MediaStream per participant (Mute state tracked), we capture each into `MediaRecorder`, chunk the resulting Opus/WebM audio every 5s, and send it to `ws://localhost:8000/meet/{session_id}/capture` as an `audio_chunk_meta` text frame followed by a binary frame. The same socket also carries transcript/caption frames and extension diagnostics used during live validation.
 
-Server-side: per participant, we accumulate Opus chunks until 30s are buffered, then ship to Whisper in 30s windows. Latency 30s + Whisper turnaround (≤ 8s on an L4 GPU) = verdict update lag of up to 40s — adequate for the prototype's "real-time in human-paced interview" requirement (PDF p4 bonus).
+Server-side: per participant, we accumulate Opus chunks until 30s are buffered, then ship to Whisper in 30s windows. On session end we flush any shorter remaining buffer so short validation meetings still produce transcript evidence. If captions are available, DOM-scraped transcript segments can reach the runtime immediately and give the transcript analyzers earlier signal while Whisper catches up.
 
 ### 3.5 Edge cases for Meet
 

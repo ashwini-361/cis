@@ -45,6 +45,7 @@ from app.schema import (
 )
 from app.store.evidence import EvidenceStore
 from app.store.state import ParticipantStateStore
+from app.store.transcript import TranscriptStore
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class TickScheduler:
         weights: WeightTable,
         evidence_store: EvidenceStore,
         state_store: ParticipantStateStore,
+        transcript_store: TranscriptStore,
         broadcast: Broadcast,
         threshold: float,
         margin: float,
@@ -72,12 +74,14 @@ class TickScheduler:
         self._weights = weights
         self._store = evidence_store
         self._state_store = state_store
+        self._transcript_store = transcript_store
         self._broadcast = broadcast
         self._threshold = threshold
         self._margin = margin
 
         self._seen_event_keys: set[tuple[str, int]] = set()
         self._participants: dict[str, str] = {}  # participant_id -> display_name
+        self._interviewer_names: set[str] = set()
 
     async def initialize(self) -> None:
         """Call ``analyzer.initialize`` once on every analyzer."""
@@ -108,6 +112,20 @@ class TickScheduler:
             self._participants[event.payload["participant_id"]] = event.payload["display_name"]
         elif event.type == EventType.PARTICIPANT_RENAMED:
             self._participants[event.payload["participant_id"]] = event.payload["new_name"]
+        elif event.type == EventType.METADATA_SCHEDULE:
+            self._interviewer_names.update(event.payload.get("interviewer_names", []))
+        elif event.type == EventType.METADATA_INTERVIEWERS:
+            self._interviewer_names.update(event.payload.get("names", []))
+        elif event.type == EventType.TRANSCRIPT_SEGMENT:
+            self._transcript_store.add_segment(
+                session_id=self._session.session_id,
+                participant_id=event.payload["participant_id"],
+                speaker_name=self._participants.get(event.payload["participant_id"]),
+                text=event.payload["text"],
+                start_sec=event.payload["start_sec"],
+                end_sec=event.payload["end_sec"],
+                source="extension" if event.envelope.source == "meet_extension" else "whisper"
+            )
 
         coros = [analyzer.on_event(event) for analyzer in self._analyzers]
         results = await asyncio.gather(*coros, return_exceptions=True)
@@ -184,6 +202,21 @@ class TickScheduler:
             margin=self._margin,
             min_participants=min_p,
         )
+
+        for state in states:
+            role = "unclear"
+            if verdict.is_decision and state.participant_id == verdict.candidate_id:
+                role = "candidate"
+            elif state.display_name in self._interviewer_names:
+                role = "interviewer"
+            elif verdict.is_decision:
+                # If we have a decision but they aren't candidate or interviewer, they are an observer
+                role = "observer"
+            
+            if state.role != role:
+                updated_state = state.model_copy(update={"role": role})
+                await self._state_store.set(updated_state)
+
         await self._broadcast(verdict)
         return verdict
 
@@ -198,6 +231,7 @@ class TickScheduler:
 
         self._seen_event_keys.clear()
         self._participants.clear()
+        self._interviewer_names.clear()
 
 
 def make_broadcast_sink() -> tuple[Broadcast, list[Verdict]]:

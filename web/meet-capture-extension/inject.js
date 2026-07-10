@@ -5,57 +5,107 @@
 // per-participant MediaStreamTrack directly via RTCPeerConnection.ontrack
 // inspection (Meet uses WebRTC internally)".
 //
-// Per-track attribution is best-effort: Meet does not publish a stable,
-// documented mapping from an RTCPeerConnection/track to a specific
-// participant tile. We tag each captured track with a locally generated
-// connection id (`pc-<n>`); content-script.js is responsible for
-// correlating that id to a participant_id via DOM observation (e.g. active-
-// speaker highlighting) since only it has access to the tile DOM. This
-// correlation is inherently fragile against Meet UI changes and should be
-// re-verified against a live call before relying on it.
+// Audio recording strategy: we use MediaRecorder.stop() + immediate restart
+// every RECORDING_INTERVAL_MS instead of MediaRecorder.start(timeslice).
+// With timeslicing, Chrome emits fragmented WebM blobs where only the first
+// blob contains the WebM initialization segment. Later blobs are orphan Cluster
+// elements that PyAV/FFmpeg cannot decode as standalone files. Calling stop()
+// causes MediaRecorder to emit one complete, self-contained WebM file per
+// interval, which faster-whisper decodes correctly every time.
 (() => {
   const NativeRTCPeerConnection = window.RTCPeerConnection;
   if (!NativeRTCPeerConnection) return;
 
   let connectionCounter = 0;
-  const CHUNK_TIMESLICE_MS = 5000;
+  const RECORDING_INTERVAL_MS = 25000; // 25s per complete WebM file
 
-  function startRecordingTrack(track, connectionId) {
-    const stream = new MediaStream([track]);
+  function chooseMimeType() {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/ogg",
+    ];
+    for (const mimeType of candidates) {
+      if (MediaRecorder.isTypeSupported(mimeType)) return mimeType;
+    }
+    return "";
+  }
+
+  function startOneCycle(stream, connectionId, onDone) {
+    const mimeType = chooseMimeType();
+    const opts = mimeType ? { mimeType } : {};
     let recorder;
     try {
-      recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      recorder = new MediaRecorder(stream, opts);
     } catch (err) {
       window.postMessage(
         { source: "cis-inject", kind: "track-error", connectionId, message: String(err) },
         "*"
       );
-      return;
+      return null;
     }
 
-    let chunkStartSec = performance.now() / 1000;
+    const cycleStartSec = performance.now() / 1000;
+
     recorder.ondataavailable = async (event) => {
       if (event.data.size === 0) return;
       const buffer = await event.data.arrayBuffer();
-      const nowSec = performance.now() / 1000;
+      const cycleEndSec = performance.now() / 1000;
       window.postMessage(
         {
           source: "cis-inject",
           kind: "audio-chunk",
           connectionId,
-          startSec: chunkStartSec,
-          endSec: nowSec,
+          startSec: cycleStartSec,
+          endSec: cycleEndSec,
           buffer,
         },
         "*",
         [buffer]
       );
-      chunkStartSec = nowSec;
+      if (typeof onDone === "function") onDone();
     };
-    recorder.start(CHUNK_TIMESLICE_MS);
+
+    recorder.onerror = () => {
+      if (typeof onDone === "function") onDone();
+    };
+
+    recorder.start(); // no timeslice
+    return recorder;
+  }
+
+  function startRecordingTrack(track, connectionId) {
+    const stream = new MediaStream([track]);
+    let activeRecorder = null;
+    let cycleTimer = null;
+    let stopped = false;
+
+    function scheduleCycle() {
+      if (stopped) return;
+      activeRecorder = startOneCycle(stream, connectionId, () => {
+        activeRecorder = null;
+        if (!stopped) {
+          setTimeout(scheduleCycle, 50);
+        }
+      });
+      if (activeRecorder) {
+        cycleTimer = setTimeout(() => {
+          if (activeRecorder && activeRecorder.state === "recording") {
+            activeRecorder.stop(); // triggers ondataavailable with complete file
+          }
+        }, RECORDING_INTERVAL_MS);
+      }
+    }
+
+    scheduleCycle();
 
     track.addEventListener("ended", () => {
-      if (recorder.state !== "inactive") recorder.stop();
+      stopped = true;
+      if (cycleTimer) clearTimeout(cycleTimer);
+      if (activeRecorder && activeRecorder.state !== "inactive") {
+        activeRecorder.stop();
+      }
     });
   }
 

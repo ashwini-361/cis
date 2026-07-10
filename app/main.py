@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -30,6 +31,8 @@ from app.runtime.registry import AnalyzerRegistry
 from app.runtime.session_runner import run_session
 from app.schema import SessionEnvelope, Verdict
 from app.session import SessionManager
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="cis")
 session_manager = SessionManager()
@@ -58,8 +61,8 @@ class _SessionStartBody(BaseModel):
 def _make_llm_provider(body: _SessionStartBody) -> LLMProvider:
     base_url = body.llm_base_url or os.environ.get("LLM_BASE_URL")
     if base_url:
-        api_key = body.llm_api_key or os.environ.get("LLM_API_KEY", "")
-        model = body.llm_model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        api_key = body.llm_api_key or os.environ.get("LLM_API_KEY") or ""
+        model = body.llm_model or os.environ.get("LLM_MODEL") or "gpt-4o-mini"
         return OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model)
     return ScriptedLLMProvider()
 
@@ -77,14 +80,18 @@ def _make_zoom_adapter() -> ZoomAdapter:
     )
     api_client = ZoomAPIClient(auth=auth, http_client=http_client)
     transcriber = FasterWhisperTranscriber(
-        model_size=os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+        model_size=os.environ.get("WHISPER_MODEL", "large-v3-turbo"),
+        device=os.environ.get("WHISPER_DEVICE", "auto"),
+        compute_type=os.environ.get("WHISPER_COMPUTE_TYPE", "default"),
     )
     return ZoomAdapter(api_client=api_client, transcriber=transcriber)
 
 
 def _make_meet_adapter() -> MeetAdapter:
     transcriber = FasterWhisperTranscriber(
-        model_size=os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+        model_size=os.environ.get("WHISPER_MODEL", "large-v3-turbo"),
+        device=os.environ.get("WHISPER_DEVICE", "auto"),
+        compute_type=os.environ.get("WHISPER_COMPUTE_TYPE", "default"),
     )
     return MeetAdapter(transcriber=transcriber)
 
@@ -120,6 +127,9 @@ async def start_session_endpoint(
         ground_truth_candidate_id=body.ground_truth_candidate_id,
     )
 
+    if isinstance(adapter, MeetAdapter):
+        adapter.prime_session(envelope)
+
     async def _broadcast(verdict: Verdict) -> None:
         await session_manager.broadcast_verdict(session_id, verdict)
 
@@ -133,11 +143,22 @@ async def start_session_endpoint(
             clock=RealClock(),
             evidence_store=session.evidence_store,
             state_store=session.state_store,
+            transcript_store=session.transcript_store,
             broadcast=_broadcast,
         )
     )
     session.runner_task = task
     return JSONResponse({"session_id": session_id, "status": "started"})
+
+
+@app.get("/sessions/{session_id}/live-debug")
+async def session_live_debug_endpoint(session_id: str) -> JSONResponse:
+    """Return counters and recent events for live Meet validation."""
+
+    snapshot = session_manager.get_live_debug_snapshot(session_id)
+    if snapshot is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    return JSONResponse(snapshot)
 
 
 @app.delete("/sessions/{session_id}")
@@ -168,6 +189,12 @@ async def meet_capture(websocket: WebSocket, session_id: str) -> None:
         await websocket.close(code=4404, reason="unknown session_id")
         return
 
+    session_manager.mark_extension_connected(
+        session_id,
+        ts=0.0,
+        message="Meet extension connected to capture ingress",
+    )
+
     pending_audio_meta: dict[str, object] | None = None
     try:
         while True:
@@ -178,21 +205,81 @@ async def meet_capture(websocket: WebSocket, session_id: str) -> None:
             if (text := message.get("text")) is not None:
                 data = json.loads(text)
                 if data.get("kind") == "control":
+                    payload = data["payload"]
+                    session_manager.record_control_message(
+                        session_id,
+                        ts=float(data["ts"]),
+                        control_type=str(data["type"]),
+                        payload=payload,
+                    )
                     await adapter.push_control_message(
-                        {"type": data["type"], "ts": data["ts"], "payload": data["payload"]}
+                        {"type": data["type"], "ts": data["ts"], "payload": payload}
                     )
                 elif data.get("kind") == "audio_chunk_meta":
                     pending_audio_meta = data
+                elif data.get("kind") == "transcript":
+                    session_manager.record_transcript_segment(
+                        session_id,
+                        ts=float(data["start_sec"]),
+                        participant_id=str(data["participant_id"]),
+                        text=str(data["text"]),
+                        start_sec=float(data["start_sec"]),
+                        end_sec=float(data["end_sec"]),
+                        speaker_name=(
+                            str(data["speaker_name"])
+                            if data.get("speaker_name")
+                            else None
+                        ),
+                    )
+                    await adapter.push_transcript_segment(
+                        {
+                            "participant_id": data["participant_id"],
+                            "text": data["text"],
+                            "start_sec": data["start_sec"],
+                            "end_sec": data["end_sec"],
+                        }
+                    )
+                elif data.get("kind") == "diagnostic":
+                    session_manager.record_diagnostic(
+                        session_id,
+                        ts=float(data.get("ts", 0.0)),
+                        kind=str(data.get("event", "diagnostic")),
+                        message=str(data.get("message", "")),
+                        payload=data.get("payload"),
+                    )
             elif (raw_bytes := message.get("bytes")) is not None and pending_audio_meta is not None:
+                participant_id = str(pending_audio_meta["participant_id"])
+                start_sec = float(
+                    cast(str | float | int, pending_audio_meta["start_sec"])
+                )
+                end_sec = float(
+                    cast(str | float | int, pending_audio_meta["end_sec"])
+                )
+                session_manager.record_audio_chunk(
+                    session_id,
+                    ts=end_sec,
+                    participant_id=participant_id,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    size_bytes=len(raw_bytes),
+                )
                 await adapter.push_audio_chunk(
-                    participant_id=pending_audio_meta["participant_id"],  # type: ignore[arg-type]
+                    participant_id=participant_id,
                     audio_bytes=raw_bytes,
-                    start_sec=pending_audio_meta["start_sec"],  # type: ignore[arg-type]
-                    end_sec=pending_audio_meta["end_sec"],  # type: ignore[arg-type]
+                    start_sec=start_sec,
+                    end_sec=end_sec,
                 )
                 pending_audio_meta = None
     except WebSocketDisconnect:
         pass
+    except Exception:
+        logger.exception("meet capture websocket failed for session %s", session_id)
+    finally:
+        session_manager.mark_extension_disconnected(
+            session_id,
+            ts=0.0,
+            message="Meet extension disconnected from capture ingress",
+        )
 
 
 @app.post("/zoom/webhook")

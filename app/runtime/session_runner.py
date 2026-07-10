@@ -24,6 +24,7 @@ from app.runtime.tick_scheduler import Broadcast, TickScheduler
 from app.schema import SessionEnvelope, Verdict, WeightTable
 from app.store.evidence import EvidenceStore
 from app.store.state import ParticipantStateStore
+from app.store.transcript import TranscriptStore
 
 if TYPE_CHECKING:
     pass
@@ -41,6 +42,7 @@ async def run_session(
     clock: Clock,
     evidence_store: EvidenceStore | None = None,
     state_store: ParticipantStateStore | None = None,
+    transcript_store: TranscriptStore | None = None,
     broadcast: Broadcast | None = None,
     threshold: float | None = None,
     margin: float | None = None,
@@ -62,6 +64,7 @@ async def run_session(
 
     store = evidence_store if evidence_store is not None else EvidenceStore()
     states = state_store if state_store is not None else ParticipantStateStore()
+    transcripts = transcript_store if transcript_store is not None else TranscriptStore()
     verdicts: list[Verdict] = []
     if broadcast is None:
         broadcast = _list_broadcast(verdicts)
@@ -73,6 +76,7 @@ async def run_session(
         weights=weights,
         evidence_store=store,
         state_store=states,
+        transcript_store=transcripts,
         broadcast=broadcast,
         threshold=threshold if threshold is not None else weights.threshold,
         margin=margin if margin is not None else weights.margin,

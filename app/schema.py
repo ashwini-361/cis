@@ -229,6 +229,7 @@ class ParticipantState(_Frozen):
     join_ts: float
     is_present: bool = True
     confidence: float = 0.0
+    role: Literal["interviewer", "candidate", "observer", "unclear"] = "unclear"
     raw_evidence: list[Evidence] = Field(default_factory=list)
     last_recompute_ts: float = 0.0
     analyzer_count: int = 0

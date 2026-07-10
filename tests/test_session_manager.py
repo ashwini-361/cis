@@ -102,3 +102,56 @@ def test_remove_subscriber() -> None:
     manager.add_subscriber("sess_1", ws)
     manager.remove_subscriber("sess_1", ws)
     assert ws not in session.subscribers
+
+
+def test_live_debug_snapshot_tracks_ingest_activity() -> None:
+    manager = SessionManager()
+    manager.create_session("sess_1", _WEIGHT_TABLE)
+
+    manager.mark_extension_connected(
+        "sess_1", ts=0.0, message="Meet extension connected to capture ingress"
+    )
+    manager.record_control_message(
+        "sess_1",
+        ts=1.0,
+        control_type="PARTICIPANT_JOINED",
+        payload={"participant_id": "P1"},
+    )
+    manager.record_audio_chunk(
+        "sess_1",
+        ts=2.0,
+        participant_id="P1",
+        start_sec=1.0,
+        end_sec=2.0,
+        size_bytes=128,
+    )
+    manager.record_transcript_segment(
+        "sess_1",
+        ts=3.0,
+        participant_id="P1",
+        text="I built Astra.",
+        start_sec=2.0,
+        end_sec=3.0,
+        speaker_name="Ashwini",
+    )
+    manager.record_diagnostic(
+        "sess_1",
+        ts=4.0,
+        kind="content.observer_started",
+        message="Meet DOM observers attached",
+    )
+
+    snapshot = manager.get_live_debug_snapshot("sess_1")
+    assert snapshot is not None
+    assert snapshot["extension_connected"] is True
+    assert snapshot["control_messages"] == 1
+    assert snapshot["audio_chunks"] == 1
+    assert snapshot["transcript_segments"] == 1
+    assert snapshot["last_transcript"] == {
+        "participant_id": "P1",
+        "speaker_name": "Ashwini",
+        "text": "I built Astra.",
+        "start_sec": 2.0,
+        "end_sec": 3.0,
+    }
+    assert any(event["kind"] == "content.observer_started" for event in snapshot["recent_events"])

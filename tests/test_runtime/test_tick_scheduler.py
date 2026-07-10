@@ -15,6 +15,7 @@ from app.runtime.tick_scheduler import TickScheduler, make_broadcast_sink
 from app.schema import Event, EventEnvelope, EventType
 from app.store.evidence import EvidenceStore
 from app.store.state import ParticipantStateStore
+from app.store.transcript import TranscriptStore
 
 
 def _envelope(
@@ -52,7 +53,8 @@ async def test_on_tick_invoked_on_every_analyzer(weights, session_envelope, scri
         weights=weights,
         evidence_store=evidence_store,
         state_store=state_store,
-        broadcast=broadcast,
+        transcript_store=TranscriptStore(),
+            broadcast=broadcast,
         threshold=weights.threshold,
         margin=weights.margin,
     )
@@ -130,7 +132,8 @@ async def test_on_event_dispatches_through_every_analyzer(
         weights=weights,
         evidence_store=evidence_store,
         state_store=state_store,
-        broadcast=broadcast,
+        transcript_store=TranscriptStore(),
+            broadcast=broadcast,
         threshold=weights.threshold,
         margin=weights.margin,
     )
@@ -184,7 +187,8 @@ async def test_process_event_idempotent_on_replayed_envelope_key(
         weights=weights,
         evidence_store=evidence_store,
         state_store=state_store,
-        broadcast=broadcast,
+        transcript_store=TranscriptStore(),
+            broadcast=broadcast,
         threshold=weights.threshold,
         margin=weights.margin,
     )
@@ -222,7 +226,8 @@ async def test_state_store_reflects_latest_fusion(weights, session_envelope, scr
         weights=weights,
         evidence_store=evidence_store,
         state_store=state_store,
-        broadcast=broadcast,
+        transcript_store=TranscriptStore(),
+            broadcast=broadcast,
         threshold=weights.threshold,
         margin=weights.margin,
     )

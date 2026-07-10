@@ -58,7 +58,7 @@ copy .env.example .env
 #   - secrets MUST remain git-ignored
 
 # 5. Run the backend
-uv run uvicorn app.main:app --reload --port 3000
+uv run uvicorn app.main:app --reload --port 8000
 
 # 6. Run the dashboard (separate terminal)
 cd web
@@ -68,7 +68,7 @@ npm run dev
 
 # 7. Run a mock interview scenario
 uv run python -m app.main --scenario happy_path
-#   - listen on ws://localhost:3000/sessions/mock-sess-001/stream
+#   - listen on ws://localhost:8000/sessions/mock-sess-001/stream
 #   - dashboard fills the verdict card as confidence rises
 
 # 8. Run the tests
@@ -144,13 +144,14 @@ The repo ships a complete documentation set under `docs/`. They were written bef
 | 16 | [`docs/SECURITY.md`](./docs/SECURITY.md) | ✅ | OAuth, PII redaction, data deletion, secrets management |
 | 17 | [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) | ✅ | Docker compose → production containerization + scaling |
 | 18 | [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) | ✅ | Per-tick latency budget, scaling matrix, SLO targets |
+| 19 | [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) | ✅ | User-visible implementation changes across phases |
 
 ### Root-level docs
 
 | # | Doc | Status | What it covers |
 |---|---|---|---|
-| 19 | `README.md` (this file) | ✅ | Entry point, quickstart, deliverables mapping, assumptions |
-| 20 | `AGENTS.md` | ✅ | Onboarding for AI coding agents working on this repo |
+| 20 | `README.md` (this file) | ✅ | Entry point, quickstart, deliverables mapping, assumptions |
+| 21 | `AGENTS.md` | ✅ | Onboarding for AI coding agents working on this repo |
 
 ---
 
@@ -161,7 +162,7 @@ The demo video script with timestamps is in [`docs/EVALUATION.md §10`](./docs/E
 ### Mock demo (no Zoom/Meet setup)
 ```powershell
 # Terminal 1
-uv run uvicorn app.main:app --reload --port 3000
+uv run uvicorn app.main:app --reload --port 8000
 
 # Terminal 2
 cd web && npm run dev

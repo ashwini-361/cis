@@ -10,7 +10,7 @@
 
 During dev:
 ```
-Base: http://localhost:3000
+Base: http://localhost:8000
 ```
 
 All routes except `/health` require a bearer token:
@@ -135,7 +135,56 @@ The `API_KEY` is set via `CIS_API_KEY` env var. Falls back to `demo-key` in dev 
   ```
   Then async sweep. On completion, the session ID will be unknown → `GET /sessions/{id}/verdicts` returns `404`.
 
-### 2.6 `GET /sessions/{session_id}/participants`
+### 2.6 `GET /sessions/{session_id}/live-debug`
+
+- **Purpose:** Live Google Meet validation surface for extension/runtime debugging.
+- **Response:** `200 OK`
+  ```json
+  {
+    "session_id": "meet-live-001",
+    "extension_connected": true,
+    "extension_connections": 1,
+    "control_messages": 7,
+    "audio_chunks": 14,
+    "transcript_segments": 9,
+    "verdict_count": 5,
+    "last_control_type": "PARTICIPANT_JOINED",
+    "last_audio": {
+      "participant_id": "P1",
+      "start_sec": 25.0,
+      "end_sec": 30.0,
+      "size_bytes": 48192
+    },
+    "last_transcript": {
+      "participant_id": "P1",
+      "speaker_name": "Ashwini",
+      "text": "I built Astra.",
+      "start_sec": 32.0,
+      "end_sec": 33.0
+    },
+    "last_verdict": {
+      "candidate_id": "P1",
+      "candidate_name": "Ashwini",
+      "confidence": 0.84,
+      "is_decision": true,
+      "ts": 35.0
+    },
+    "recent_events": [
+      {
+        "ts": 1.1,
+        "kind": "content.observer_started",
+        "message": "Meet DOM observers attached",
+        "payload": {}
+      }
+    ]
+  }
+  ```
+- **Errors:**
+  | Status | Body | Condition |
+  |---|---|---|
+  | `404` | `{"error":"session not found"}` | session_id unknown |
+
+### 2.7 `GET /sessions/{session_id}/participants`
 
 - **Purpose:** Current participant list with their confidences.
 - **Response:** `200 OK`
@@ -161,7 +210,7 @@ The `API_KEY` is set via `CIS_API_KEY` env var. Falls back to `demo-key` in dev 
 
 ### 3.1 `WS /sessions/{session_id}/stream`
 
-- **Protocol:** ws or wss (dev: ws://localhost:3000/sessions/{id}/stream)
+- **Protocol:** ws or wss (dev: ws://localhost:8000/sessions/{id}/stream)
 - **Auth:** Bearer token in query: `?token=<API_KEY>` (or `Cookie: token=<API_KEY>`)
 - **Sub-protocol:** none — messages are uncompressed JSON text frames.
 - **Direction:** Server → client only. Client sends a simple keep-alive ping `{"ping": true}` every 30s; server responds `{"pong": true}`.
@@ -170,13 +219,17 @@ The `API_KEY` is set via `CIS_API_KEY` env var. Falls back to `demo-key` in dev 
 - **Disconnect:** Clean disconnect OK; server re-sends missed verdicts on re-connection if session still active.
 - **Errors:** If token invalid, `4001` close code with JSON `{"error":"unauthorized"}`. If session expired, `4002` `{"error":"session_ended"}`.
 
-### 3.2 Additional WS endpoint: `WS /sessions/{session_id}/ingest`
+### 3.2 Additional WS endpoint: `WS /meet/{session_id}/capture`
 
-- **Purpose:** Direct event injection (for the Meet Chrome extension to send real-time audio chunks, events, participant metadata).
+- **Purpose:** Direct ingress for the Meet Chrome extension.
 - **Direction:** Client → server only.
-- **Messages:** Client sends `Event` objects (same shape as [DATA_CONTRACT.md §2](./DATA_CONTRACT.md)), one per frame. The server bus validates and ingests.
-- **Auth:** Bearer token in query.
-- **Rate limit:** 20 events/sec maximum.
+- **Messages:**
+  - `{"kind":"control", ...}` → participant/webcam/screen-share lifecycle events.
+  - `{"kind":"audio_chunk_meta", ...}` text frame immediately followed by a binary audio frame.
+  - `{"kind":"transcript", ...}` → caption/transcript segments captured from the Meet DOM.
+  - `{"kind":"diagnostic", ...}` → selector/capture/runtime validation logs shown via `GET /sessions/{id}/live-debug`.
+- **Auth:** none in local dev; intended for localhost-only extension use.
+- **Rate limit:** bounded by the extension; server stores only recent diagnostics.
 
 ### 3.3 WebSocket timeline sequence (client lifecycle)
 
