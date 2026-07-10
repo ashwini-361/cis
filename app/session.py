@@ -8,6 +8,7 @@ connected WebSocket subscribers, and the latest broadcast Verdict).
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -47,9 +48,39 @@ class LiveDebugState:
     last_audio: dict[str, object] | None = None
     last_transcript: dict[str, object] | None = None
     last_verdict: dict[str, object] | None = None
+    fallback_only_mode: bool = False
+    caption_transcript_active: bool = False
+    last_transcript_ts: float = 0.0
+    last_audio_ts: float = 0.0
+    unmapped_audio_participants: set[str] = field(default_factory=set)
+    mapped_audio_participants: set[str] = field(default_factory=set)
     recent_events: deque[LiveDebugEvent] = field(
         default_factory=lambda: deque(maxlen=100)
     )
+
+    @property
+    def transcribing_lag(self) -> bool:
+        if self.last_audio_ts == 0.0:
+            return False
+        return (self.last_audio_ts - self.last_transcript_ts) > 10.0
+
+    @property
+    def audio_mapping_coverage(self) -> float:
+        if self.mapped_audio_participants:
+            return 1.0
+        if self.unmapped_audio_participants:
+            return 0.0
+        return 1.0
+
+    @property
+    def transcript_source_active(self) -> bool:
+        if self.caption_transcript_active:
+            return True
+        if self.last_transcript is not None:
+            return True
+        if self.last_audio_ts == 0.0:
+            return False
+        return not self.transcribing_lag
 
     def add_event(
         self, ts: float, kind: str, message: str, payload: dict[str, object] | None = None
@@ -60,11 +91,17 @@ class LiveDebugState:
             LiveDebugEvent(ts=ts, kind=kind, message=message, payload=payload or {})
         )
 
-    def snapshot(self, session_id: str) -> dict[str, object]:
+    def snapshot(self) -> dict[str, object]:
         """Serialize the current live-debug view for the API."""
 
+        # Transcript coverage info
+        transcript_coverage = {
+            "total_segments": self.transcript_segments,
+            "caption_active": self.caption_transcript_active,
+            "transcribing_lag": self.transcribing_lag,
+        }
+
         return {
-            "session_id": session_id,
             "extension_connected": self.extension_connected,
             "extension_connections": self.extension_connections,
             "control_messages": self.control_messages,
@@ -76,6 +113,12 @@ class LiveDebugState:
             "last_audio": self.last_audio,
             "last_transcript": self.last_transcript,
             "last_verdict": self.last_verdict,
+            "fallback_only_mode": self.fallback_only_mode,
+            "transcript_source_active": self.transcript_source_active,
+            "audio_mapping_coverage": self.audio_mapping_coverage,
+            "transcribing_lag": self.transcribing_lag,
+            "per_participant_mode": len(self.mapped_audio_participants) > 0,
+            "transcript_coverage": transcript_coverage,
             "recent_events": [
                 {
                     "ts": event.ts,
@@ -139,6 +182,19 @@ class SessionManager:
 
         return self._sessions.get(session_id)
 
+    def list_sessions(self) -> list[dict[str, object]]:
+        """Return summary info for all active sessions."""
+        result: list[dict[str, object]] = []
+        for sid, sess in self._sessions.items():
+            result.append({
+                "session_id": sid,
+                "verdict_count": sess.live_debug.verdict_count,
+                "latest_candidate_id": sess.latest_verdict.candidate_id if sess.latest_verdict else None,
+                "latest_candidate_name": sess.latest_verdict.candidate_name if sess.latest_verdict else None,
+                "latest_confidence": sess.latest_verdict.confidence if sess.latest_verdict else None,
+            })
+        return result
+
     def remove_session(self, session_id: str) -> None:
         """Remove a session from the registry."""
 
@@ -158,6 +214,42 @@ class SessionManager:
         if session is not None and websocket in session.subscribers:
             session.subscribers.remove(websocket)
 
+    def _stream_payload(self, session_id: str) -> dict[str, object] | None:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        return {
+            "kind": "session_update",
+            "session_id": session_id,
+            "verdict": (
+                session.latest_verdict.model_dump(mode="json")
+                if session.latest_verdict is not None
+                else None
+            ),
+            "live_debug": self.get_live_debug_snapshot(session_id),
+        }
+
+    async def _broadcast_stream_payload(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        payload = self._stream_payload(session_id)
+        if session is None or payload is None:
+            return
+        dead: list[Any] = []
+        for websocket in session.subscribers:
+            try:
+                await websocket.send_json(payload)
+            except Exception:  # noqa: BLE001
+                dead.append(websocket)
+        for websocket in dead:
+            session.subscribers.remove(websocket)
+
+    def _schedule_stream_update(self, session_id: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._broadcast_stream_payload(session_id))
+
     def mark_extension_connected(
         self, session_id: str, *, ts: float, message: str
     ) -> None:
@@ -169,6 +261,7 @@ class SessionManager:
         session.live_debug.extension_connected = True
         session.live_debug.extension_connections += 1
         session.live_debug.add_event(ts, "extension.connected", message)
+        self._schedule_stream_update(session_id)
 
     def mark_extension_disconnected(
         self, session_id: str, *, ts: float, message: str
@@ -180,6 +273,7 @@ class SessionManager:
             return
         session.live_debug.extension_connected = False
         session.live_debug.add_event(ts, "extension.disconnected", message)
+        self._schedule_stream_update(session_id)
 
     def record_control_message(
         self,
@@ -198,6 +292,7 @@ class SessionManager:
         session.live_debug.last_control_type = control_type
         session.live_debug.last_control_payload = payload
         session.live_debug.add_event(ts, "control", control_type, payload)
+        self._schedule_stream_update(session_id)
 
     def record_audio_chunk(
         self,
@@ -222,12 +317,22 @@ class SessionManager:
         }
         session.live_debug.audio_chunks += 1
         session.live_debug.last_audio = snapshot
+        session.live_debug.last_audio_ts = ts
+
+        if participant_id == "mixed-tab-audio":
+            session.live_debug.unmapped_audio_participants.add(participant_id)
+            if not session.live_debug.mapped_audio_participants:
+                session.live_debug.fallback_only_mode = True
+        else:
+            session.live_debug.mapped_audio_participants.add(participant_id)
+            session.live_debug.fallback_only_mode = False
         session.live_debug.add_event(
             ts,
             "audio.chunk",
             f"audio chunk for {participant_id}",
             snapshot,
         )
+        self._schedule_stream_update(session_id)
 
     def record_transcript_segment(
         self,
@@ -239,12 +344,20 @@ class SessionManager:
         start_sec: float,
         end_sec: float,
         speaker_name: str | None,
+        source: str = "extension",
     ) -> None:
         """Increment transcript counters and retain the latest transcript preview."""
 
         session = self._sessions.get(session_id)
         if session is None:
             return
+        # Try to get speaker name from state store if not provided
+        if speaker_name is None and session.state_store is not None:
+            states = session.state_store.get_all_sync(session_id)
+            for s in states:
+                if s.participant_id == participant_id and s.display_name:
+                    speaker_name = s.display_name
+                    break
         preview = text if len(text) <= 120 else f"{text[:117]}..."
         snapshot: dict[str, object] = {
             "participant_id": participant_id,
@@ -252,15 +365,20 @@ class SessionManager:
             "text": preview,
             "start_sec": start_sec,
             "end_sec": end_sec,
+            "source": source,
         }
         session.live_debug.transcript_segments += 1
         session.live_debug.last_transcript = snapshot
+        session.live_debug.last_transcript_ts = max(
+            session.live_debug.last_transcript_ts, end_sec
+        )
         session.live_debug.add_event(
-            ts,
+            end_sec,
             "transcript.segment",
             f"transcript for {participant_id}",
             snapshot,
         )
+        self._schedule_stream_update(session_id)
 
     def record_diagnostic(
         self,
@@ -276,7 +394,17 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is None:
             return
+        if kind == "offscreen.fallback_started":
+            session.live_debug.fallback_only_mode = True
+        elif kind == "offscreen.fallback_stopped":
+            session.live_debug.fallback_only_mode = False
+        elif kind == "content.transcript_source_active":
+            session.live_debug.caption_transcript_active = True
+        elif kind == "content.transcript_source_inactive":
+            session.live_debug.caption_transcript_active = False
+
         session.live_debug.add_event(ts, kind, message, payload)
+        self._schedule_stream_update(session_id)
 
     def get_live_debug_snapshot(
         self, session_id: str
@@ -286,7 +414,29 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is None:
             return None
-        return session.live_debug.snapshot(session_id)
+        snapshot = session.live_debug.snapshot()
+        snapshot["session_id"] = session_id
+        segments = session.transcript_store.get_full_transcript(session_id)
+        participants = session.state_store.get_all_sync(session_id)
+        snapshot["per_participant_mode"] = not session.live_debug.fallback_only_mode
+        snapshot["transcript_coverage"] = {
+            "total_segments": len(segments),
+            "caption_active": session.live_debug.caption_transcript_active,
+            "transcribing_lag": session.live_debug.transcribing_lag,
+        }
+        snapshot["role_summary"] = {
+            "total_participants": len(participants),
+            "roles": [
+                {
+                    "participant_id": p.participant_id,
+                    "display_name": p.display_name,
+                    "role": p.role,
+                    "confidence": p.confidence,
+                }
+                for p in participants
+            ],
+        }
+        return snapshot
 
     async def broadcast_verdict(self, session_id: str, verdict: Verdict) -> None:
         """Fan a verdict to every subscriber and update live-debug metadata."""
@@ -313,11 +463,4 @@ class SessionManager:
                 "is_decision": verdict.is_decision,
             },
         )
-        dead: list[Any] = []
-        for websocket in session.subscribers:
-            try:
-                await websocket.send_json(verdict.model_dump(mode="json"))
-            except Exception:  # noqa: BLE001 -- a dead/broken client shouldn't stop the broadcast to others
-                dead.append(websocket)
-        for websocket in dead:
-            session.subscribers.remove(websocket)
+        await self._broadcast_stream_payload(session_id)
