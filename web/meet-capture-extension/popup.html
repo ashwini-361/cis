@@ -3,21 +3,62 @@
   <head>
     <meta charset="utf-8" />
     <title>cis Meet Capturer</title>
-    <style>
-      body { font-family: system-ui, sans-serif; width: 240px; padding: 12px; }
-      input { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
-      button { width: 100%; padding: 6px; }
-      #status { font-size: 12px; color: #555; margin-top: 8px; }
-    </style>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <label for="session-id">Session ID</label>
-    <input id="session-id" type="text" placeholder="meet-live-001" />
-    <label for="server-base-url">Server URL</label>
-    <input id="server-base-url" type="text" placeholder="http://localhost:8000" />
-    <button id="start">Start capture</button>
-    <button id="stop">Stop capture</button>
-    <div id="status"></div>
+    <div class="section">
+      <div class="section-title">CIS Audio/State Capture</div>
+      <label class="field-label" for="session-id">Session ID</label>
+      <input id="session-id" type="text" placeholder="meet-live-001" />
+      <label class="field-label" for="server-base-url">Server URL</label>
+      <input id="server-base-url" type="text" placeholder="http://localhost:8000" />
+      <div class="capture-buttons">
+        <button id="start" class="capture-btn">Start capture</button>
+        <button id="stop" class="capture-btn">Stop capture</button>
+      </div>
+      <div id="status"></div>
+    </div>
+
+    <div class="randomize-container">
+      <div class="header">
+        <h1>Randomize Meet Participants</h1>
+      </div>
+      <div class="content">
+        <ul id="list"></ul>
+      </div>
+      <div class="custom-list hidden">
+        <textarea
+          rows="5"
+          name="custom-list"
+          id="custom-list-area"
+          placeholder="Put your list here, separated by comma or enter. Click shuffle button to update the list"
+        ></textarea>
+      </div>
+      <div class="buttons">
+        <input
+          type="image"
+          src="images/shuffle.png"
+          alt="Shuffle"
+          id="shuffle"
+          title="Shuffle"
+        />
+        <input
+          type="image"
+          src="images/list.png"
+          alt="Custom list"
+          id="custom-list-bt"
+          title="Add custom list"
+        />
+        <input
+          type="image"
+          src="images/logo16.png"
+          alt="Extract participant names"
+          id="extract-names"
+          title="Extract participant names"
+        />
+      </div>
+    </div>
+
     <script src="popup.js"></script>
   </body>
 </html>

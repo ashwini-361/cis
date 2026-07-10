@@ -63,8 +63,8 @@ class MetadataAnalyzer(Analyzer):
         self._seen.add(key)
 
         if event.type == EventType.METADATA_CANDIDATE:
-            self._candidate_name = event.payload["name"]
-            self._candidate_email = event.payload["email"]
+            self._candidate_name = event.payload.get("name")
+            self._candidate_email = event.payload.get("email")
             return []
 
         if event.type in (EventType.PARTICIPANT_JOINED, EventType.PARTICIPANT_RENAMED):

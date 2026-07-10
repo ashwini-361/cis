@@ -108,7 +108,7 @@ function connect() {
       sessionId,
       serverBaseUrl: socketBase,
     });
-    socket.close();
+    socket?.close();
   });
 }
 
@@ -302,6 +302,12 @@ chrome.runtime.onMessage.addListener((message) => {
         console.error("cis Meet Capturer: fallback capture failed", err);
         emitDiagnostic("offscreen.fallback_error", String(err), { sessionId });
       });
+      break;
+    case "stop-fallback-capture":
+      emitDiagnostic("offscreen.fallback_stopped", "Stopped fallback tab audio capture", {
+        sessionId,
+      });
+      stopFallbackRecorder();
       break;
   }
 });

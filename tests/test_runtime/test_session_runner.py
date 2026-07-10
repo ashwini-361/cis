@@ -15,11 +15,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.ingest.base import IngestAdapter
 from app.ingest.mock import MockAdapter
 from app.runtime.clock import ManualClock
 from app.runtime.registry import build_default
 from app.runtime.session_runner import run_session
-from app.schema import SessionEnvelope
+from app.schema import Event, EventEnvelope, EventType, SessionEnvelope
 
 HAPPY_PATH = Path(
     "I:/Project/meet/cis/data/recordings/happy_path.json"
@@ -118,3 +119,128 @@ async def test_session_runner_no_events_lost(weights, scripted_llm) -> None:
     # ~60s window, we expect some segment-derived evidence to accrue.
     dec = max(v.total_evidence for v in verdicts)
     assert dec >= 5, f"Pipeline accumulated too little evidence ({dec}) -- on_tick regression?"
+
+
+class _SingleTranscriptAdapter(IngestAdapter):
+    async def start_session(self, session_envelope: SessionEnvelope) -> None:
+        self._session_envelope = session_envelope
+
+    async def end_session(self, reason: str = "normal") -> None:
+        return None
+
+    async def stream_events(self):
+        yield Event(
+            type=EventType.PARTICIPANT_JOINED,
+            envelope=EventEnvelope(
+                session_id=self._session_envelope.session_id,
+                ts=1.0,
+                wall_clock="2026-07-09T00:00:01Z",
+                platform="meet",
+                source="meet.extension",
+                sequence=1,
+            ),
+            payload={
+                "participant_id": "mixed-tab-audio",
+                "display_name": "Mixed Tab Audio",
+                "email": None,
+                "device_name": None,
+                "join_order": 1,
+            },
+        )
+        yield Event(
+            type=EventType.TRANSCRIPT_SEGMENT,
+            envelope=EventEnvelope(
+                session_id=self._session_envelope.session_id,
+                ts=6.0,
+                wall_clock="2026-07-09T00:00:06Z",
+                platform="meet",
+                source="meet.transcript.whisper",
+                sequence=2,
+            ),
+            payload={
+                "participant_id": "mixed-tab-audio",
+                "text": "Thanks for joining today.",
+                "start_sec": 0.0,
+                "end_sec": 6.0,
+            },
+        )
+
+
+async def test_session_runner_event_callback_observes_whisper_transcripts(weights) -> None:
+    seen: list[Event] = []
+    envelope = SessionEnvelope(
+        session_id="meet-sess-1",
+        platform="meet",
+        start_wall_clock="2026-07-09T00:00:00Z",
+    )
+
+    async def _record(event: Event) -> None:
+        seen.append(event)
+
+    await run_session(
+        adapter=_SingleTranscriptAdapter(),
+        session_envelope=envelope,
+        platform="meet",
+        analyzers=[],
+        weights=weights,
+        clock=ManualClock(),
+        event_callback=_record,
+    )
+
+    whisper_events = [e for e in seen if e.envelope.source == "meet.transcript.whisper"]
+    assert len(whisper_events) == 1
+    assert whisper_events[0].payload["text"] == "Thanks for joining today."
+
+
+class _SingleJoinAdapter(IngestAdapter):
+    async def start_session(self, session_envelope: SessionEnvelope) -> None:
+        self._session_envelope = session_envelope
+
+    async def end_session(self, reason: str = "normal") -> None:
+        return None
+
+    async def stream_events(self):
+        yield Event(
+            type=EventType.PARTICIPANT_JOINED,
+            envelope=EventEnvelope(
+                session_id=self._session_envelope.session_id,
+                ts=1.0,
+                wall_clock="2026-07-09T00:00:01Z",
+                platform="meet",
+                source="meet.extension",
+                sequence=1,
+            ),
+            payload={
+                "participant_id": "spaces/meet/devices/343",
+                "display_name": "Rahul",
+                "email": None,
+                "device_name": None,
+                "join_order": 1,
+            },
+        )
+
+
+async def test_session_runner_bootstrap_candidate_metadata_surfaces_provisional_candidate(
+    weights, scripted_llm
+) -> None:
+    verdicts = await run_session(
+        adapter=_SingleJoinAdapter(),
+        session_envelope=SessionEnvelope(
+            session_id="meet-sess-bootstrap",
+            platform="meet",
+            start_wall_clock="2026-07-09T00:00:00Z",
+            candidate_name="Rahul",
+            expected_participants=["Rahul", "Interviewer"],
+        ),
+        platform="meet",
+        analyzers=build_default(weights, scripted_llm),
+        weights=weights,
+        clock=ManualClock(),
+    )
+
+    assert len(verdicts) > 0
+    final_verdict = verdicts[-1]
+    assert final_verdict.is_decision is False
+    assert final_verdict.candidate_id == "spaces/meet/devices/343"
+    assert final_verdict.candidate_name == "Rahul"
+    assert final_verdict.confidence is not None

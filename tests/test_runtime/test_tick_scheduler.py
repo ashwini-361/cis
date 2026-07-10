@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from app.runtime.registry import build_default
 from app.runtime.tick_scheduler import TickScheduler, make_broadcast_sink
-from app.schema import Event, EventEnvelope, EventType
+from app.schema import Event, EventEnvelope, EventType, SessionEnvelope
 from app.store.evidence import EvidenceStore
 from app.store.state import ParticipantStateStore
 from app.store.transcript import TranscriptStore
@@ -252,3 +252,95 @@ async def test_state_store_reflects_latest_fusion(weights, session_envelope, scr
     assert p1.participant_id == "P1"
     assert p1.confidence > 0.0  # email_match is sticky, no decay
     assert p1.last_recompute_ts == 50.0
+
+
+async def test_process_event_maps_raw_meet_audio_alias_to_named_participant(
+    weights, scripted_llm
+) -> None:
+    base_envelope = EventEnvelope(
+        session_id="meet-sess-1",
+        ts=0.0,
+        source="test",
+        sequence=0,
+        wall_clock="2026-07-09T00:00:00Z",
+        platform="meet",
+    )
+    broadcast, _ = make_broadcast_sink()
+    analyzers = build_default(weights, scripted_llm)
+    transcript_store = TranscriptStore()
+
+    scheduler = TickScheduler(
+        session_envelope=SessionEnvelope(
+            session_id="meet-sess-1",
+            platform="meet",
+            start_wall_clock="2026-07-09T00:00:00Z",
+        ),
+        platform="meet",
+        analyzers=analyzers,
+        weights=weights,
+        evidence_store=EvidenceStore(),
+        state_store=ParticipantStateStore(),
+        transcript_store=transcript_store,
+        broadcast=broadcast,
+        threshold=weights.threshold,
+        margin=weights.margin,
+    )
+    await scheduler.initialize()
+
+    join_events = [
+        Event(
+            type=EventType.PARTICIPANT_JOINED,
+            envelope=base_envelope.model_copy(update={"sequence": 1, "ts": 1.0}),
+            payload={
+                "participant_id": "spaces/meet/devices/343",
+                "display_name": "Rahul",
+                "email": None,
+                "device_name": None,
+                "join_order": 1,
+            },
+        ),
+        Event(
+            type=EventType.PARTICIPANT_JOINED,
+            envelope=base_envelope.model_copy(update={"sequence": 2, "ts": 2.0}),
+            payload={
+                "participant_id": "spaces/meet/devices/344",
+                "display_name": "devices",
+                "email": None,
+                "device_name": None,
+                "join_order": 2,
+            },
+        ),
+        Event(
+            type=EventType.PARTICIPANT_JOINED,
+            envelope=base_envelope.model_copy(update={"sequence": 3, "ts": 3.0}),
+            payload={
+                "participant_id": "spaces/meet/devices/345",
+                "display_name": "devices",
+                "email": None,
+                "device_name": None,
+                "join_order": 3,
+            },
+        ),
+    ]
+    for event in join_events:
+        await scheduler.process_event(event)
+
+    await scheduler.process_event(
+        Event(
+            type=EventType.TRANSCRIPT_SEGMENT,
+            envelope=base_envelope.model_copy(
+                update={"sequence": 4, "ts": 30.0, "source": "meet.transcript.whisper"}
+            ),
+            payload={
+                "participant_id": "pc-1",
+                "text": "Tell me about your background.",
+                "start_sec": 30.0,
+                "end_sec": 33.0,
+            },
+        )
+    )
+
+    transcript = transcript_store.get_full_transcript("meet-sess-1")
+    assert len(transcript) == 1
+    assert transcript[0].participant_id == "spaces/meet/devices/343"
+    assert transcript[0].speaker_name == "Rahul"

@@ -25,8 +25,9 @@ def make_router(session_manager: SessionManager) -> APIRouter:
             await websocket.close(code=4404, reason="unknown session_id")
             return
 
-        if session.latest_verdict is not None:
-            await websocket.send_json(session.latest_verdict.model_dump(mode="json"))
+        payload = session_manager._stream_payload(session_id)
+        if payload is not None:
+            await websocket.send_json(payload)
         session_manager.add_subscriber(session_id, websocket)
 
         try:

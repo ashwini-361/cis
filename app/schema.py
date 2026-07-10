@@ -151,8 +151,8 @@ class TranscriptSegmentPayload(_Frozen):
 
 
 class MetadataCandidatePayload(_Frozen):
-    name: str
-    email: str
+    name: str | None = None
+    email: str | None = None
     calendar_invite_id: str | None = None
 
 
@@ -295,4 +295,40 @@ class SessionEnvelope(_Frozen):
     expected_duration_min: int = 60
     expected_participants: list[str] = Field(default_factory=list)
     ground_truth_candidate_id: str | None = None
+    candidate_name: str | None = None
+    candidate_email: str | None = None
+    interviewer_names: list[str] = Field(default_factory=list)
+    calendar_invite_id: str | None = None
     notes: str = ""
+
+
+# --- 8. API Read Response Models --------------------------------------------
+
+
+class TranscriptSegmentResponse(_Frozen):
+    segment_id: str
+    session_id: str
+    participant_id: str
+    speaker_name: str | None
+    text: str
+    start_sec: float
+    end_sec: float
+    source: Literal["extension", "whisper"]
+    arrival_sequence: int
+
+
+class TranscriptListResponse(_Frozen):
+    session_id: str
+    segments: list[TranscriptSegmentResponse] = Field(default_factory=list)
+
+
+class ParticipantRoleInfo(_Frozen):
+    participant_id: str
+    display_name: str
+    role: Literal["interviewer", "candidate", "observer", "unclear"]
+    confidence: float
+
+
+class RoleSnapshotResponse(_Frozen):
+    session_id: str
+    participants: list[ParticipantRoleInfo] = Field(default_factory=list)

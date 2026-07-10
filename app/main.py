@@ -29,12 +29,30 @@ from app.ingest.zoom import (
 from app.runtime.clock import RealClock
 from app.runtime.registry import AnalyzerRegistry
 from app.runtime.session_runner import run_session
-from app.schema import SessionEnvelope, Verdict
+from app.schema import (
+    Event,
+    EventType,
+    ParticipantRoleInfo,
+    RoleSnapshotResponse,
+    SessionEnvelope,
+    TranscriptListResponse,
+    TranscriptSegmentResponse,
+    Verdict,
+)
 from app.session import SessionManager
 
 logger = logging.getLogger(__name__)
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="cis")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 session_manager = SessionManager()
 
 app.include_router(routes.router)
@@ -50,6 +68,9 @@ class _SessionStartBody(BaseModel):
     platform: Literal["zoom", "meet"]
     expected_participants: list[str] = []
     ground_truth_candidate_id: str | None = None
+    candidate_name: str | None = None
+    candidate_email: str | None = None
+    interviewer_names: list[str] = []
     # LLM provider: real when llm_base_url or LLM_BASE_URL env var is set;
     # falls back to ScriptedLLMProvider (offline/deterministic) otherwise.
     llm_base_url: str | None = None
@@ -125,6 +146,9 @@ async def start_session_endpoint(
         start_wall_clock=datetime.now(UTC).isoformat(),
         expected_participants=body.expected_participants,
         ground_truth_candidate_id=body.ground_truth_candidate_id,
+        candidate_name=body.candidate_name,
+        candidate_email=body.candidate_email,
+        interviewer_names=body.interviewer_names,
     )
 
     if isinstance(adapter, MeetAdapter):
@@ -132,6 +156,30 @@ async def start_session_endpoint(
 
     async def _broadcast(verdict: Verdict) -> None:
         await session_manager.broadcast_verdict(session_id, verdict)
+
+    async def _record_runtime_event(event: Event) -> None:
+        if event.type != EventType.TRANSCRIPT_SEGMENT:
+            return
+        if not event.envelope.source.endswith(".whisper"):
+            return
+        participant_id = str(event.payload["participant_id"])
+        speaker_name: str | None = event.payload.get("speaker_name")
+        if not speaker_name:
+            session_obj = session_manager.get_session(session_id)
+            if session_obj and session_obj.state_store:
+                state = session_obj.state_store.get(session_id, participant_id)
+                if state and state.display_name:
+                    speaker_name = state.display_name
+        session_manager.record_transcript_segment(
+            session_id,
+            ts=event.envelope.ts,
+            participant_id=participant_id,
+            text=str(event.payload["text"]),
+            start_sec=float(event.payload["start_sec"]),
+            end_sec=float(event.payload["end_sec"]),
+            speaker_name=speaker_name,
+            source="whisper",
+        )
 
     task: asyncio.Task[list[Verdict]] = asyncio.create_task(
         run_session(
@@ -145,10 +193,17 @@ async def start_session_endpoint(
             state_store=session.state_store,
             transcript_store=session.transcript_store,
             broadcast=_broadcast,
+            event_callback=_record_runtime_event,
         )
     )
     session.runner_task = task
     return JSONResponse({"session_id": session_id, "status": "started"})
+
+
+@app.get("/sessions")
+async def list_sessions_endpoint() -> JSONResponse:
+    """List all active sessions."""
+    return JSONResponse({"sessions": session_manager.list_sessions()})
 
 
 @app.get("/sessions/{session_id}/live-debug")
@@ -159,6 +214,55 @@ async def session_live_debug_endpoint(session_id: str) -> JSONResponse:
     if snapshot is None:
         return JSONResponse({"error": "session not found"}, status_code=404)
     return JSONResponse(snapshot)
+
+
+@app.get("/sessions/{session_id}/transcript")
+async def get_session_transcript_endpoint(session_id: str) -> JSONResponse:
+    """Return ordered transcript segments for the session."""
+    session = session_manager.get_session(session_id)
+    if session is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    stored_segments = session.transcript_store.get_full_transcript(session_id)
+    response = TranscriptListResponse(
+        session_id=session_id,
+        segments=[
+            TranscriptSegmentResponse(
+                segment_id=seg.segment_id,
+                session_id=seg.session_id,
+                participant_id=seg.participant_id,
+                speaker_name=seg.speaker_name,
+                text=seg.text,
+                start_sec=seg.start_sec,
+                end_sec=seg.end_sec,
+                source=seg.source,
+                arrival_sequence=seg.arrival_sequence,
+            )
+            for seg in stored_segments
+        ],
+    )
+    return JSONResponse(response.model_dump())
+
+
+@app.get("/sessions/{session_id}/roles")
+async def get_session_roles_endpoint(session_id: str) -> JSONResponse:
+    """Return current participant roles and confidence."""
+    session = session_manager.get_session(session_id)
+    if session is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    participants = await session.state_store.get_all(session_id)
+    response = RoleSnapshotResponse(
+        session_id=session_id,
+        participants=[
+            ParticipantRoleInfo(
+                participant_id=p.participant_id,
+                display_name=p.display_name,
+                role=p.role,
+                confidence=p.confidence,
+            )
+            for p in participants
+        ],
+    )
+    return JSONResponse(response.model_dump())
 
 
 @app.delete("/sessions/{session_id}")
@@ -230,10 +334,12 @@ async def meet_capture(websocket: WebSocket, session_id: str) -> None:
                             if data.get("speaker_name")
                             else None
                         ),
+                        source="extension",
                     )
                     await adapter.push_transcript_segment(
                         {
                             "participant_id": data["participant_id"],
+                            "speaker_name": data.get("speaker_name"),
                             "text": data["text"],
                             "start_sec": data["start_sec"],
                             "end_sec": data["end_sec"],
@@ -311,5 +417,3 @@ async def zoom_webhook(request: Request) -> JSONResponse:
         await adapter.push_webhook_event(payload)
 
     return JSONResponse({"status": "ok"})
-
-

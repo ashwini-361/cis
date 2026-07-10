@@ -89,6 +89,114 @@ def test_faster_whisper_transcriber_closes_temp_file_before_model_read(
     assert segments == [{"text": "hello", "start_sec": 0.0, "end_sec": 1.0}]
 
 
+def test_faster_whisper_transcriber_falls_back_to_small_model_on_init_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeModel:
+        def __init__(self, model_size: str, device: str, compute_type: str) -> None:
+            self.model_size = model_size
+            self.device = device
+            self.compute_type = compute_type
+
+    monkeypatch.setenv("WHISPER_FALLBACK_MODEL", "small")
+
+    def _instantiate_model(
+        self: FasterWhisperTranscriber, model_size: str, device: str, compute_type: str
+    ) -> FakeModel:
+        if model_size == "large-v3-turbo":
+            raise RuntimeError("large model unavailable")
+        return FakeModel(model_size, device, compute_type)
+
+    monkeypatch.setattr(
+        FasterWhisperTranscriber,
+        "_instantiate_model",
+        _instantiate_model,
+    )
+
+    transcriber = FasterWhisperTranscriber(
+        model_size="large-v3-turbo",
+        device="auto",
+        compute_type="default",
+    )
+
+    assert transcriber._model_size == "small"
+    assert transcriber._device == "cpu"
+    assert transcriber._compute_type == "int8"
+    assert transcriber._model.model_size == "small"
+
+
+def test_faster_whisper_transcriber_falls_back_to_small_model_after_cpu_retry_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Seg:
+        def __init__(self, text: str, start: float, end: float) -> None:
+            self.text = text
+            self.start = start
+            self.end = end
+
+    class FakeInfo:
+        language = "en"
+        language_probability = 0.99
+        duration = 1.0
+
+    class FakeModel:
+        def __init__(self, model_size: str, device: str, compute_type: str) -> None:
+            self.model_size = model_size
+            self.device = device
+            self.compute_type = compute_type
+
+        def transcribe(self, path: str):
+            if self.model_size == "large-v3-turbo" and self.device == "auto":
+                raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+            if self.model_size == "large-v3-turbo" and self.device == "cpu":
+                raise RuntimeError("large model failed on cpu")
+            return ([_Seg("hello", 0.0, 1.0)], FakeInfo())
+
+    class FakeTmp:
+        def __init__(self) -> None:
+            self.name = "fake-temp.webm"
+            self.closed = False
+            self.written = b""
+
+        def write(self, data: bytes) -> int:
+            self.written += data
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+        def fileno(self) -> int:
+            return 123
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_tmp = FakeTmp()
+    monkeypatch.setattr(meet_module.tempfile, "NamedTemporaryFile", lambda **_: fake_tmp)
+    monkeypatch.setattr(meet_module.os, "fsync", lambda _fd: None)
+    monkeypatch.setattr(meet_module.os, "unlink", lambda _path: None)
+
+    transcriber = object.__new__(FasterWhisperTranscriber)
+    transcriber._model_size = "large-v3-turbo"
+    transcriber._fallback_model_size = "small"
+    transcriber._device = "auto"
+    transcriber._compute_type = "default"
+    transcriber._model = FakeModel("large-v3-turbo", "auto", "default")
+    transcriber._debug_saved = False
+
+    def _instantiate_model(model_size: str, device: str, compute_type: str) -> FakeModel:
+        return FakeModel(model_size, device, compute_type)
+
+    transcriber._instantiate_model = _instantiate_model  # type: ignore[method-assign]
+
+    segments = transcriber._transcribe_sync(b"chunk-bytes")
+
+    assert segments == [{"text": "hello", "start_sec": 0.0, "end_sec": 1.0}]
+    assert transcriber._model_size == "small"
+    assert transcriber._device == "cpu"
+    assert transcriber._compute_type == "int8"
+
+
 async def _new_adapter(
     segments: list[SegmentDict] | None = None,
 ) -> tuple[MeetAdapter, FakeTranscriber]:
@@ -273,6 +381,7 @@ def test_websocket_route_dispatches_control_audio_and_transcript() -> None:
     assert received_transcript == [
         {
             "participant_id": "P1",
+            "speaker_name": "Ashwini",
             "text": "I built Astra.",
             "start_sec": 5.0,
             "end_sec": 6.0,
@@ -348,6 +457,8 @@ def test_live_debug_endpoint_reports_ingest_activity() -> None:
     assert payload["last_control_type"] == "PARTICIPANT_JOINED"
     assert payload["last_audio"]["participant_id"] == "P1"
     assert payload["last_transcript"]["speaker_name"] == "Ashwini"
+    assert payload["last_transcript"]["source"] == "extension"
+    assert payload["transcript_source_active"] is True
     assert any(event["kind"] == "content.observer_started" for event in payload["recent_events"])
 
 
@@ -356,3 +467,21 @@ def test_websocket_route_closes_unknown_session() -> None:
     with client.websocket_connect("/meet/unknown-session/capture") as ws:
         with pytest.raises(Exception):  # noqa: B017 -- starlette raises on the closed connection
             ws.receive_text()
+
+@pytest.mark.anyio
+async def test_meet_adapter_drops_mixed_tab_audio_if_mapped() -> None:
+    adapter, _ = await _new_adapter()
+    
+    # Send mapped audio
+    await adapter.push_audio_chunk("P1", b"mapped", 0.0, 5.0)
+    assert adapter._has_mapped_audio is True
+    assert "P1" in adapter._buffers
+    
+    # Send mixed-tab-audio (should be dropped)
+    await adapter.push_audio_chunk("mixed-tab-audio", b"mixed", 5.0, 10.0)
+    assert "mixed-tab-audio" not in adapter._buffers
+    
+    # Reset and test the case where mapped audio hasn't arrived
+    adapter._has_mapped_audio = False
+    await adapter.push_audio_chunk("mixed-tab-audio", b"mixed2", 10.0, 15.0)
+    assert "mixed-tab-audio" in adapter._buffers

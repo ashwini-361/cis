@@ -89,9 +89,9 @@ def _gate_below_threshold(
         session_id=session_id,
         ts=t,
         platform=platform,
-        candidate_id=None,
-        candidate_name=None,
-        confidence=None,
+        candidate_id=top.participant_id if top.confidence > 0.0 else None,
+        candidate_name=top.display_name if top.confidence > 0.0 else None,
+        confidence=top.confidence,
         runner_up_id=runner.participant_id if runner else None,
         runner_up_confidence=runner.confidence if runner else None,
         margin=None,
@@ -107,6 +107,7 @@ def _gate_below_margin(
     session_id: str,
     platform: str,
     t: float,
+    top: ParticipantState,
     runner: ParticipantState,
     provisional_reasons: list[str],
     analyzer_count: int,
@@ -118,9 +119,9 @@ def _gate_below_margin(
         session_id=session_id,
         ts=t,
         platform=platform,
-        candidate_id=None,
-        candidate_name=None,
-        confidence=None,
+        candidate_id=top.participant_id,
+        candidate_name=top.display_name,
+        confidence=top.confidence,
         runner_up_id=runner.participant_id,
         runner_up_confidence=runner.confidence,
         margin=observed_margin,
@@ -158,13 +159,14 @@ def decide(
         return _gate_no_participants(session_id, platform, t)
 
     if len(states) < min_participants:
+        top = max(states, key=lambda s: s.confidence)
         return Verdict(
             session_id=session_id,
             ts=t,
             platform=platform,
-            candidate_id=None,
-            candidate_name=None,
-            confidence=None,
+            candidate_id=top.participant_id,
+            candidate_name=top.display_name,
+            confidence=top.confidence,
             runner_up_id=None,
             runner_up_confidence=None,
             margin=None,
@@ -194,7 +196,7 @@ def decide(
     observed_margin = top.confidence - runner.confidence if runner is not None else top.confidence
     if runner is not None and observed_margin < margin:
         return _gate_below_margin(
-            session_id, platform, t, runner, provisional_reasons,
+            session_id, platform, t, top, runner, provisional_reasons,
             analyzer_count, total_evidence, observed_margin, margin,
         )
 

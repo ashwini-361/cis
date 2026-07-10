@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
+from typing import Literal
 
 from app.analyzers.base import Analyzer
 from app.explain.generator import Explainer
@@ -48,8 +50,21 @@ from app.store.state import ParticipantStateStore
 from app.store.transcript import TranscriptStore
 
 logger = logging.getLogger(__name__)
+_RAW_AUDIO_PARTICIPANT_RE = re.compile(r"^(pc-\d+|mixed-tab-audio)$")
+_DEVICE_NAME_TOKENS = ("device", "devices", "iphone", "ipad", "macbook", "laptop", "desktop")
 
 Broadcast = Callable[[Verdict], Awaitable[None]]
+
+
+def _transcript_store_source(event_source: str) -> Literal["extension", "whisper"]:
+    if event_source.endswith(".whisper"):
+        return "whisper"
+    return "extension"
+
+
+def _looks_like_placeholder_name(display_name: str) -> bool:
+    lowered = display_name.strip().lower()
+    return lowered == "" or any(token in lowered for token in _DEVICE_NAME_TOKENS)
 
 
 class TickScheduler:
@@ -102,6 +117,7 @@ class TickScheduler:
         """
 
         produced: list[Evidence] = []
+        event = self._canonicalize_transcript_event(event)
 
         key = (event.envelope.source, event.envelope.sequence)
         if key in self._seen_event_keys:
@@ -120,11 +136,14 @@ class TickScheduler:
             self._transcript_store.add_segment(
                 session_id=self._session.session_id,
                 participant_id=event.payload["participant_id"],
-                speaker_name=self._participants.get(event.payload["participant_id"]),
+                speaker_name=(
+                    event.payload.get("speaker_name")
+                    or self._participants.get(event.payload["participant_id"])
+                ),
                 text=event.payload["text"],
                 start_sec=event.payload["start_sec"],
                 end_sec=event.payload["end_sec"],
-                source="extension" if event.envelope.source == "meet_extension" else "whisper"
+                source=_transcript_store_source(event.envelope.source),
             )
 
         coros = [analyzer.on_event(event) for analyzer in self._analyzers]
@@ -139,6 +158,38 @@ class TickScheduler:
                 await self._store.append(evidence)
                 produced.append(evidence)
         return produced
+
+    def _canonicalize_transcript_event(self, event: Event) -> Event:
+        """Map raw Meet audio aliases back onto known participant ids when safe."""
+
+        if event.type != EventType.TRANSCRIPT_SEGMENT:
+            return event
+
+        participant_id = event.payload["participant_id"]
+        if participant_id in self._participants:
+            return event
+        if not _RAW_AUDIO_PARTICIPANT_RE.match(participant_id):
+            return event
+
+        canonical_id = self._infer_transcript_participant_id()
+        if canonical_id is None:
+            return event
+
+        payload = dict(event.payload)
+        payload["participant_id"] = canonical_id
+        return Event(type=event.type, envelope=event.envelope, payload=payload)
+
+    def _infer_transcript_participant_id(self) -> str | None:
+        candidates = [
+            participant_id
+            for participant_id, display_name in self._participants.items()
+            if not _looks_like_placeholder_name(display_name)
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) == 0 and len(self._participants) == 1:
+            return next(iter(self._participants))
+        return None
 
     async def tick(self, t: float) -> Verdict:
         """One fusion recomputation at time ``t``."""

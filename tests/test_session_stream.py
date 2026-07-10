@@ -61,8 +61,10 @@ def test_stream_route_sends_latest_verdict_on_connect() -> None:
     try:
         with client.websocket_connect("/sessions/stream-test-1/stream") as ws:
             data = ws.receive_json()
+            assert data["kind"] == "session_update"
             assert data["session_id"] == "stream-test-1"
-            assert data["candidate_id"] == "P1"
+            assert data["verdict"]["candidate_id"] == "P1"
+            assert data["live_debug"]["session_id"] == "stream-test-1"
     finally:
         session_manager.remove_session("stream-test-1")
 

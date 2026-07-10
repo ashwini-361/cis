@@ -153,5 +153,99 @@ def test_live_debug_snapshot_tracks_ingest_activity() -> None:
         "text": "I built Astra.",
         "start_sec": 2.0,
         "end_sec": 3.0,
+        "source": "extension",
     }
     assert any(event["kind"] == "content.observer_started" for event in snapshot["recent_events"])
+
+
+def test_live_debug_lag_detection() -> None:
+    manager = SessionManager()
+    manager.create_session("sess_1", _WEIGHT_TABLE)
+
+    manager.record_transcript_segment(
+        "sess_1",
+        ts=1.0,
+        participant_id="P1",
+        text="Hello",
+        start_sec=0.0,
+        end_sec=1.0,
+        speaker_name="Ashwini",
+    )
+    manager.record_audio_chunk(
+        "sess_1",
+        ts=12.0,
+        participant_id="P1",
+        start_sec=1.0,
+        end_sec=12.0,
+        size_bytes=1024,
+    )
+
+    snapshot = manager.get_live_debug_snapshot("sess_1")
+    assert snapshot is not None
+    # 12.0 - 1.0 = 11.0 > 10.0 => lag
+    assert snapshot["transcribing_lag"] is True
+
+    # Now transcript catches up
+    manager.record_transcript_segment(
+        "sess_1",
+        ts=12.5,
+        participant_id="P1",
+        text="World",
+        start_sec=1.0,
+        end_sec=12.0,
+        speaker_name="Ashwini",
+    )
+
+    snapshot2 = manager.get_live_debug_snapshot("sess_1")
+    # 12.0 - 12.5 = -0.5 <= 10.0 => no lag
+    assert snapshot2["transcribing_lag"] is False
+
+
+def test_live_debug_fallback_audio_is_reported_as_unmapped() -> None:
+    manager = SessionManager()
+    manager.create_session("sess_1", _WEIGHT_TABLE)
+
+    manager.record_audio_chunk(
+        "sess_1",
+        ts=25.0,
+        participant_id="mixed-tab-audio",
+        start_sec=0.0,
+        end_sec=25.0,
+        size_bytes=2048,
+    )
+
+    snapshot = manager.get_live_debug_snapshot("sess_1")
+    assert snapshot is not None
+    assert snapshot["fallback_only_mode"] is True
+    assert snapshot["audio_mapping_coverage"] == 0.0
+    assert snapshot["transcript_source_active"] is False
+
+
+def test_live_debug_whisper_transcript_marks_source_active() -> None:
+    manager = SessionManager()
+    manager.create_session("sess_1", _WEIGHT_TABLE)
+
+    manager.record_audio_chunk(
+        "sess_1",
+        ts=25.0,
+        participant_id="mixed-tab-audio",
+        start_sec=0.0,
+        end_sec=25.0,
+        size_bytes=2048,
+    )
+    manager.record_transcript_segment(
+        "sess_1",
+        ts=0.0,
+        participant_id="mixed-tab-audio",
+        text="Thanks for joining today.",
+        start_sec=0.0,
+        end_sec=6.0,
+        speaker_name=None,
+        source="whisper",
+    )
+
+    snapshot = manager.get_live_debug_snapshot("sess_1")
+    assert snapshot is not None
+    assert snapshot["transcript_segments"] == 1
+    assert snapshot["transcript_source_active"] is True
+    assert snapshot["last_transcript"]["source"] == "whisper"

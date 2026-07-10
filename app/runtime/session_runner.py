@@ -21,7 +21,7 @@ from app.analyzers.base import Analyzer
 from app.ingest.base import IngestAdapter
 from app.runtime.clock import Clock
 from app.runtime.tick_scheduler import Broadcast, TickScheduler
-from app.schema import SessionEnvelope, Verdict, WeightTable
+from app.schema import Event, EventEnvelope, EventType, SessionEnvelope, Verdict, WeightTable
 from app.store.evidence import EvidenceStore
 from app.store.state import ParticipantStateStore
 from app.store.transcript import TranscriptStore
@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+EventCallback = Callable[[Event], Awaitable[None]]
 
 
 async def run_session(
@@ -44,6 +46,7 @@ async def run_session(
     state_store: ParticipantStateStore | None = None,
     transcript_store: TranscriptStore | None = None,
     broadcast: Broadcast | None = None,
+    event_callback: EventCallback | None = None,
     threshold: float | None = None,
     margin: float | None = None,
 ) -> list[Verdict]:
@@ -84,10 +87,13 @@ async def run_session(
 
     await adapter.start_session(session_envelope)
     await scheduler.initialize()
+    await _inject_bootstrap_metadata(scheduler, session_envelope)
 
     try:
         async for event in adapter.stream_events():
             await scheduler.process_event(event)
+            if event_callback is not None:
+                await event_callback(event)
             t = event.envelope.ts
             _step_clock(clock, t)
             await scheduler.tick(t)
@@ -95,6 +101,64 @@ async def run_session(
         await adapter.end_session(reason="normal")
 
     return verdicts
+
+
+async def _inject_bootstrap_metadata(
+    scheduler: TickScheduler, session_envelope: SessionEnvelope
+) -> None:
+    """Seed live sessions with candidate/schedule metadata when callers provide it."""
+
+    bootstrap_events: list[Event] = []
+
+    if session_envelope.candidate_name is not None or session_envelope.candidate_email is not None:
+        bootstrap_events.append(
+            Event(
+                type=EventType.METADATA_CANDIDATE,
+                envelope=_bootstrap_envelope(session_envelope, sequence=-3),
+                payload={
+                    "name": session_envelope.candidate_name,
+                    "email": session_envelope.candidate_email,
+                    "calendar_invite_id": session_envelope.calendar_invite_id,
+                },
+            )
+        )
+
+    if session_envelope.interviewer_names:
+        bootstrap_events.append(
+            Event(
+                type=EventType.METADATA_SCHEDULE,
+                envelope=_bootstrap_envelope(session_envelope, sequence=-2),
+                payload={
+                    "start_wall_clock": session_envelope.start_wall_clock,
+                    "expected_duration_min": session_envelope.expected_duration_min,
+                    "interviewer_names": session_envelope.interviewer_names,
+                },
+            )
+        )
+        bootstrap_events.append(
+            Event(
+                type=EventType.METADATA_INTERVIEWERS,
+                envelope=_bootstrap_envelope(session_envelope, sequence=-1),
+                payload={
+                    "names": session_envelope.interviewer_names,
+                    "emails": [],
+                },
+            )
+        )
+
+    for event in bootstrap_events:
+        await scheduler.process_event(event)
+
+
+def _bootstrap_envelope(session_envelope: SessionEnvelope, *, sequence: int) -> EventEnvelope:
+    return EventEnvelope(
+        session_id=session_envelope.session_id,
+        ts=0.0,
+        wall_clock=session_envelope.start_wall_clock,
+        platform=session_envelope.platform,
+        source="session.bootstrap",
+        sequence=sequence,
+    )
 
 
 def _step_clock(clock: Clock, t: float) -> None:

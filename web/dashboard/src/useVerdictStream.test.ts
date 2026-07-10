@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useVerdictStream } from "./useVerdictStream";
-import { decidableVerdict } from "./test-fixtures";
+import { decidableVerdict, sessionUpdateMessage } from "./test-fixtures";
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -52,7 +52,7 @@ describe("useVerdictStream", () => {
     expect(FakeWebSocket.instances[0]?.url).toBe("ws://test/sessions/sess_1/stream");
   });
 
-  it("transitions to open and stores the verdict + history on message", () => {
+  it("transitions to open and stores the verdict + history on session update", () => {
     const { result } = renderHook(() =>
       useVerdictStream("sess_1", "ws://test/sessions/sess_1/stream")
     );
@@ -61,10 +61,22 @@ describe("useVerdictStream", () => {
     act(() => socket.emitOpen());
     expect(result.current.connectionState).toBe("open");
 
-    act(() => socket.emitMessage(decidableVerdict));
+    act(() => socket.emitMessage(sessionUpdateMessage));
     expect(result.current.verdict).toEqual(decidableVerdict);
+    expect(result.current.liveDebug).toEqual(sessionUpdateMessage.live_debug);
     expect(result.current.history).toHaveLength(1);
     expect(result.current.history[0].P1).toBe(0.97);
+  });
+
+  it("still accepts legacy raw verdict messages", () => {
+    const { result } = renderHook(() =>
+      useVerdictStream("sess_1", "ws://test/sessions/sess_1/stream")
+    );
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitMessage(decidableVerdict));
+    expect(result.current.verdict).toEqual(decidableVerdict);
+    expect(result.current.liveDebug).toBeNull();
   });
 
   it("transitions to closed on close", () => {

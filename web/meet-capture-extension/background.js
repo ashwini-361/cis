@@ -22,18 +22,25 @@ async function ensureOffscreenDocument() {
 async function startFallbackTabCapture(sessionId) {
   if (!activeTabId || fallbackStarted) return;
   fallbackStarted = true;
-  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: activeTabId });
-  chrome.runtime.sendMessage({
-    target: "offscreen",
-    kind: "start-fallback-capture",
-    sessionId,
-    streamId,
-  });
+  chrome.runtime.sendMessage({ target: "background", kind: "diagnostic", event: "offscreen.fallback_started", message: "Fallback started" });
+  try {
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: activeTabId });
+    chrome.runtime.sendMessage({
+      target: "offscreen",
+      kind: "start-fallback-capture",
+      sessionId,
+      streamId,
+    });
+  } catch (err) {
+    console.warn("Failed to capture tab MediaStreamId (active stream exists?):", err);
+    fallbackStarted = false;
+  }
 }
 
 function stopFallbackCapture() {
   if (!fallbackStarted) return;
   fallbackStarted = false;
+  chrome.runtime.sendMessage({ target: "background", kind: "diagnostic", event: "offscreen.fallback_stopped", message: "Fallback stopped" });
   chrome.runtime.sendMessage({ target: "offscreen", kind: "stop-fallback-capture" });
 }
 

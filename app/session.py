@@ -346,18 +346,26 @@ class SessionManager:
         speaker_name: str | None,
         source: str = "extension",
     ) -> None:
-        """Increment transcript counters and retain the latest transcript preview."""
-
         session = self._sessions.get(session_id)
         if session is None:
             return
-        # Try to get speaker name from state store if not provided
         if speaker_name is None and session.state_store is not None:
             states = session.state_store.get_all_sync(session_id)
             for s in states:
                 if s.participant_id == participant_id and s.display_name:
                     speaker_name = s.display_name
                     break
+
+        session.transcript_store.add_segment(
+            session_id=session_id,
+            participant_id=participant_id,
+            speaker_name=speaker_name,
+            text=text,
+            start_sec=start_sec,
+            end_sec=end_sec,
+            source=source,
+        )
+
         preview = text if len(text) <= 120 else f"{text[:117]}..."
         snapshot: dict[str, object] = {
             "participant_id": participant_id,

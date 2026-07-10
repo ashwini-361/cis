@@ -201,7 +201,9 @@ def test_decide_below_threshold_returns_not_deciding() -> None:
     verdict = decide("sess_1", "mock", [state], t=12.3, explainer=Explainer())
     assert verdict.is_decision is False
     assert "threshold" in verdict.not_deciding_reason
-    assert verdict.candidate_id is None
+    assert verdict.candidate_id == "P1"
+    assert verdict.candidate_name == "Ashwini"
+    assert verdict.confidence == pytest.approx(0.42)
 
 
 def test_decide_margin_too_small_returns_not_deciding() -> None:
@@ -216,6 +218,8 @@ def test_decide_margin_too_small_returns_not_deciding() -> None:
     verdict = decide("sess_1", "mock", [top, runner], t=0.0, explainer=Explainer())
     assert verdict.is_decision is False
     assert "margin" in verdict.not_deciding_reason
+    assert verdict.candidate_id == "P1"
+    assert verdict.confidence == pytest.approx(0.60)
 
 
 def test_decide_decidable_verdict_uses_explainer() -> None:

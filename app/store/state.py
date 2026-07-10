@@ -52,4 +52,7 @@ class ParticipantStateStore:
                 "Redis-backed get_all requires a session->participant index; "
                 "deferred until a later phase needs it."
             )
+        return self.get_all_sync(session_id)
+
+    def get_all_sync(self, session_id: str) -> list[ParticipantState]:
         return [state for (sid, _), state in self._memory.items() if sid == session_id]

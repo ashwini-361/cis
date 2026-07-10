@@ -50,13 +50,54 @@ class FasterWhisperTranscriber:
         device: str = "auto",
         compute_type: str = "default",
     ) -> None:
-        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
-
         self._model_size = model_size
+        self._fallback_model_size = os.environ.get("WHISPER_FALLBACK_MODEL", "small")
         self._device = device
         self._compute_type = compute_type
-        self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
         self._debug_saved = False
+        self._model = self._load_model(
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
+        )
+
+    def _instantiate_model(self, model_size: str, device: str, compute_type: str) -> Any:
+        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+
+        return WhisperModel(model_size, device=device, compute_type=compute_type)
+
+    def _load_model(self, model_size: str, device: str, compute_type: str) -> Any:
+        try:
+            model = self._instantiate_model(model_size, device, compute_type)
+            self._model_size = model_size
+            self._device = device
+            self._compute_type = compute_type
+            return model
+        except Exception:
+            if model_size == self._fallback_model_size:
+                raise
+            logger.warning(
+                "Could not initialize Whisper model %s on %s/%s. Falling back to %s.",
+                model_size,
+                device,
+                compute_type,
+                self._fallback_model_size,
+                exc_info=True,
+            )
+            model = self._instantiate_model(
+                self._fallback_model_size, "cpu", "int8"
+            )
+            self._model_size = self._fallback_model_size
+            self._device = "cpu"
+            self._compute_type = "int8"
+            return model
+
+    def _reload_model(self, model_size: str, device: str, compute_type: str) -> None:
+        self._model = self._load_model(
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
+        )
 
     async def transcribe(self, audio_bytes: bytes, participant_id: str) -> list[SegmentDict]:
         return await asyncio.to_thread(self._transcribe_sync, audio_bytes)
@@ -99,11 +140,20 @@ class FasterWhisperTranscriber:
                         "CUDA libraries missing (%s). Falling back to CPU for transcription. Set WHISPER_DEVICE=cpu to silence this.",
                         error_msg
                     )
-                    from faster_whisper import WhisperModel
-                    self._device = "cpu"
-                    self._compute_type = "int8"
-                    self._model = WhisperModel(self._model_size, device=self._device, compute_type=self._compute_type)
-                    segments, info = self._model.transcribe(tmp.name)
+                    self._reload_model(self._model_size, "cpu", "int8")
+                    try:
+                        segments, info = self._model.transcribe(tmp.name)
+                    except RuntimeError as retry_error:
+                        if self._model_size == self._fallback_model_size:
+                            raise retry_error
+                        logger.warning(
+                            "Primary Whisper model %s still failed on CPU (%s). Falling back to %s.",
+                            self._model_size,
+                            retry_error,
+                            self._fallback_model_size,
+                        )
+                        self._reload_model(self._fallback_model_size, "cpu", "int8")
+                        segments, info = self._model.transcribe(tmp.name)
                 else:
                     raise e
             segment_list = [
@@ -168,15 +218,16 @@ class MeetAdapter(IngestAdapter):
         self._ended = asyncio.Event()
         self._end_reason = "normal"
         self._started = False
+        self._has_mapped_audio = False
 
-    def _next_envelope(self, ts: float) -> EventEnvelope:
+    def _next_envelope(self, ts: float, *, source: str | None = None) -> EventEnvelope:
         assert self._session_envelope is not None, "start_session() must be called first"
         envelope = EventEnvelope(
             session_id=self._session_envelope.session_id,
             ts=ts,
             wall_clock=datetime.now(UTC).isoformat(),
             platform="meet",
-            source=self._source,
+            source=source or self._source,
             sequence=self._sequence,
         )
         self._sequence += 1
@@ -214,6 +265,12 @@ class MeetAdapter(IngestAdapter):
     async def push_audio_chunk(
         self, participant_id: str, audio_bytes: bytes, start_sec: float, end_sec: float
     ) -> None:
+        if participant_id != "mixed-tab-audio":
+            self._has_mapped_audio = True
+        elif self._has_mapped_audio:
+            logger.debug("MeetAdapter skipping mixed-tab-audio chunk because mapped audio is flowing")
+            return
+
         buffer = self._buffers.setdefault(participant_id, _AudioBuffer())
         if buffer.start_sec is None:
             buffer.start_sec = start_sec
@@ -238,9 +295,12 @@ class MeetAdapter(IngestAdapter):
         await self._queue.put(
             Event(
                 type=EventType.TRANSCRIPT_SEGMENT,
-                envelope=self._next_envelope(raw["start_sec"]),
+                envelope=self._next_envelope(
+                    raw["start_sec"], source="meet.transcript.extension"
+                ),
                 payload={
                     "participant_id": raw["participant_id"],
+                    "speaker_name": raw.get("speaker_name"),
                     "text": raw["text"],
                     "start_sec": raw["start_sec"],
                     "end_sec": raw["end_sec"],
@@ -311,7 +371,9 @@ class MeetAdapter(IngestAdapter):
                 await self._queue.put(
                     Event(
                         type=EventType.TRANSCRIPT_SEGMENT,
-                        envelope=self._next_envelope(absolute_start),
+                        envelope=self._next_envelope(
+                            absolute_start, source="meet.transcript.whisper"
+                        ),
                         payload={
                             "participant_id": participant_id,
                             "text": segment["text"],

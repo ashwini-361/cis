@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -37,12 +37,23 @@ class TranscriptStore:
         text: str,
         start_sec: float,
         end_sec: float,
-        source: Literal["extension", "whisper"] = "extension",
+        source: str = "extension",
     ) -> None:
-        """Add a transcript segment, applying basic deduplication."""
-        # Simple dedupe key using start_sec and end_sec rounded to handle minor jitter
-        segment_id = f"{participant_id}_{round(start_sec, 1)}_{round(end_sec, 1)}_{source}"
-        
+        normalized_source: Literal["extension", "whisper"] = (
+            "whisper" if source.endswith("whisper") else "extension"
+        )
+        segment_id = (
+            f"{participant_id}_{round(start_sec, 1)}_{round(end_sec, 1)}_{normalized_source}"
+        )
+
+        if session_id not in self._segments:
+            self._segments[session_id] = []
+
+        existing = self._segments[session_id]
+        for seg in existing:
+            if seg.segment_id == segment_id:
+                return
+
         self._sequence_counter += 1
         segment = StoredTranscriptSegment(
             segment_id=segment_id,
@@ -52,33 +63,42 @@ class TranscriptStore:
             text=text,
             start_sec=start_sec,
             end_sec=end_sec,
-            source=source,
+            source=normalized_source,
             arrival_sequence=self._sequence_counter,
         )
 
-        if session_id not in self._segments:
-            self._segments[session_id] = []
-
-        self._segments[session_id].append(segment)
-        self._segments[session_id].sort(key=lambda s: (s.start_sec, s.arrival_sequence))
+        existing.append(segment)
+        existing.sort(key=lambda s: (s.start_sec, s.arrival_sequence))
 
     def get_full_transcript(self, session_id: str) -> list[StoredTranscriptSegment]:
-        """Return the accumulated transcript, deduplicating Whisper vs extension."""
         segments = self._segments.get(session_id, [])
         if not segments:
             return []
 
-        # Simplistic resolution: prefer extension over whisper if they overlap heavily
-        resolved = []
+        resolved: list[StoredTranscriptSegment] = []
+        seen_ids: set[str] = set()
+
         for seg in segments:
-            # Check overlap with last resolved
+            if seg.segment_id in seen_ids:
+                continue
+            seen_ids.add(seg.segment_id)
+
             if resolved and seg.start_sec < resolved[-1].end_sec:
                 last = resolved[-1]
-                if last.source == "extension" and seg.source == "whisper":
-                    continue  # Ignore whisper if extension covers it
-                elif last.source == "whisper" and seg.source == "extension":
-                    resolved[-1] = seg  # Replace whisper with extension
+                if last.segment_id == seg.segment_id:
                     continue
+                seg_duration = max(seg.end_sec - seg.start_sec, 0.01)
+                overlap_frac = (resolved[-1].end_sec - seg.start_sec) / seg_duration
+                if last.source == "extension" and seg.source == "whisper":
+                    if overlap_frac > 0.5:
+                        continue
+                elif last.source == "whisper" and seg.source == "extension":
+                    if overlap_frac > 0.5:
+                        resolved[-1] = seg
+                        continue
+                elif last.source == "whisper" and seg.source == "whisper":
+                    if overlap_frac > 0.5 and len(seg.text) < len(last.text):
+                        continue
             resolved.append(seg)
         return resolved
 
