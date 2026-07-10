@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.bus import EventBus
 from app.schema import Verdict, WeightTable
+from app.store.evidence import EvidenceStore
 from app.store.state import ParticipantStateStore
 
 if TYPE_CHECKING:
@@ -29,6 +30,16 @@ class Session:
     # list[WebSocket]; typed Any here to avoid a hard fastapi import in this module
     subscribers: list[Any] = field(default_factory=list)
     latest_verdict: Verdict | None = None
+    # EvidenceStore: Phase 9A additions — the live evidence-production
+    # path needs it alongside the state store. Lazy-optional like its
+    # neighbors (Redis-backed when ``redis_url`` is provided; in-memory
+    # otherwise). Sessions that don't drive a TickScheduler just leave
+    # the store empty.
+    evidence_store: EvidenceStore = field(default_factory=EvidenceStore)
+    # Background asyncio.Task driving the live run_session loop. Set by
+    # POST /sessions/{id}; cancelled by DELETE /sessions/{id}.
+    # Typed Any to avoid a hard asyncio.Task[...] import cycle here.
+    runner_task: Any = None
 
 
 class SessionManager:
@@ -43,6 +54,7 @@ class SessionManager:
             bus=EventBus(redis_url=redis_url),
             state_store=ParticipantStateStore(redis_url=redis_url),
             weights=weights,
+            evidence_store=EvidenceStore(redis_url=redis_url),
         )
         self._sessions[session_id] = session
         return session

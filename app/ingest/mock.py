@@ -19,7 +19,7 @@ SleepFn = Callable[[float], Awaitable[None]]
 
 class _CandidateMeta(BaseModel):
     name: str
-    email: str
+    email: str | None = None
 
 
 class _InterviewerMeta(BaseModel):

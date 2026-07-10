@@ -1,0 +1,266 @@
+{
+  "version": "1.0.0",
+  "scenario_id": "renamed_candidate",
+  "platform": "mock",
+  "session": {
+    "session_id": "mock-sess-002",
+    "platform": "mock",
+    "start_wall_clock": "2026-07-09T10:00:00Z",
+    "expected_duration_min": 30,
+    "expected_participants": [
+      "P1",
+      "P2",
+      "P3"
+    ],
+    "ground_truth_candidate_id": "P1",
+    "notes": "Renamed-candidate scenario: candidate changes display_name mid-meeting from 'Ashwini Kumar' to 'MacBook'. Name-similarity evidence drops; email + transcript-role must still identify P1."
+  },
+  "metadata": {
+    "candidate": {
+      "name": "Ashwini Kumar",
+      "email": "ashwini.kumar@gmail.com"
+    },
+    "interviewers": [
+      {
+        "name": "Priya Sharma",
+        "email": "priya@acme.corp"
+      }
+    ],
+    "schedule": {
+      "start_wall_clock": "2026-07-09T10:00:00Z",
+      "expected_duration_min": 30,
+      "calendar_invite_id": "evt_mock_2"
+    }
+  },
+  "participants": [
+    {
+      "participant_id": "P1",
+      "display_name": "Ashwini Kumar",
+      "email": "ashwini.kumar@gmail.com",
+      "device_name": null,
+      "join_order": 1,
+      "join_ts": 1.1,
+      "leave_ts": 1800.0
+    },
+    {
+      "participant_id": "P2",
+      "display_name": "Priya Sharma",
+      "email": "priya@acme.corp",
+      "device_name": null,
+      "join_order": 2,
+      "join_ts": 30.0,
+      "leave_ts": 1800.0
+    },
+    {
+      "participant_id": "P3",
+      "display_name": "Alice",
+      "email": null,
+      "device_name": null,
+      "join_order": 3,
+      "join_ts": 95.0,
+      "leave_ts": 1800.0
+    }
+  ],
+  "events": [
+    {
+      "type": "PARTICIPANT_JOINED",
+      "ts": 1.1,
+      "payload": {
+        "participant_id": "P1",
+        "display_name": "Ashwini Kumar",
+        "email": "ashwini.kumar@gmail.com",
+        "device_name": null,
+        "join_order": 1
+      }
+    },
+    {
+      "type": "WEBCAM_ON",
+      "ts": 2.0,
+      "payload": {
+        "participant_id": "P1"
+      }
+    },
+    {
+      "type": "PARTICIPANT_JOINED",
+      "ts": 30.0,
+      "payload": {
+        "participant_id": "P2",
+        "display_name": "Priya Sharma",
+        "email": "priya@acme.corp",
+        "device_name": null,
+        "join_order": 2
+      }
+    },
+    {
+      "type": "WEBCAM_ON",
+      "ts": 30.2,
+      "payload": {
+        "participant_id": "P2"
+      }
+    },
+    {
+      "type": "PARTICIPANT_JOINED",
+      "ts": 95.0,
+      "payload": {
+        "participant_id": "P3",
+        "display_name": "Alice",
+        "email": null,
+        "device_name": null,
+        "join_order": 3
+      }
+    },
+    {
+      "type": "PARTICIPANT_RENAMED",
+      "ts": 200.0,
+      "payload": {
+        "participant_id": "P1",
+        "old_name": "Ashwini Kumar",
+        "new_name": "MacBook"
+      }
+    },
+    {
+      "type": "SCREEN_SHARE_START",
+      "ts": 240.0,
+      "payload": {
+        "participant_id": "P1",
+        "content_label": "code editor / IDE"
+      }
+    },
+    {
+      "type": "SCREEN_SHARE_STOP",
+      "ts": 320.0,
+      "payload": {
+        "participant_id": "P1"
+      }
+    },
+    {
+      "type": "PARTICIPANT_LEFT",
+      "ts": 1800.0,
+      "payload": {
+        "participant_id": "P1",
+        "leave_ts": 1800.0
+      }
+    },
+    {
+      "type": "PARTICIPANT_LEFT",
+      "ts": 1800.0,
+      "payload": {
+        "participant_id": "P2",
+        "leave_ts": 1800.0
+      }
+    },
+    {
+      "type": "PARTICIPANT_LEFT",
+      "ts": 1800.0,
+      "payload": {
+        "participant_id": "P3",
+        "leave_ts": 1800.0
+      }
+    }
+  ],
+  "transcript_segments": [
+    {
+      "participant_id": "P2",
+      "text": "Hi Ashwini, thanks for joining. Tell me a bit about yourself.",
+      "start_sec": 65.0,
+      "end_sec": 70.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "Sure. I'm a backend engineer with three years of async Python work, mostly on streaming pipelines.",
+      "start_sec": 71.0,
+      "end_sec": 90.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "Great. What drew you to this role?",
+      "start_sec": 91.5,
+      "end_sec": 94.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "The real-time fraud detection focus — I've worked on low-latency join systems before.",
+      "start_sec": 95.0,
+      "end_sec": 115.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "Walk me through your most recent project.",
+      "start_sec": 120.5,
+      "end_sec": 124.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "I built Astra, a document search pipeline over a 50k-batch corpus with sub-400ms p95.",
+      "start_sec": 125.0,
+      "end_sec": 175.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "What scale did you test that at?",
+      "start_sec": 180.0,
+      "end_sec": 182.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "About 50k documents per query batch, p95 latency under 400ms.",
+      "start_sec": 183.0,
+      "end_sec": 200.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "So, switching topics — why are you leaving your current role?",
+      "start_sec": 245.0,
+      "end_sec": 248.5
+    },
+    {
+      "participant_id": "P1",
+      "text": "Looking for more ownership over end-to-end system design.",
+      "start_sec": 250.0,
+      "end_sec": 268.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "Can you describe a time you disagreed with a teammate and how you resolved it?",
+      "start_sec": 280.0,
+      "end_sec": 284.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "On the Astra index refresh policy — I wanted pull-mode, they wanted push. I benchmarked both and the data carried it.",
+      "start_sec": 285.0,
+      "end_sec": 320.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "Excellent. Any questions for me?",
+      "start_sec": 340.0,
+      "end_sec": 342.5
+    },
+    {
+      "participant_id": "P1",
+      "text": "Yes — what does the on-call rotation look like here?",
+      "start_sec": 344.0,
+      "end_sec": 348.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "One week every six weeks.",
+      "start_sec": 350.0,
+      "end_sec": 353.0
+    }
+  ],
+  "expected_output": {
+    "decision_ts": 350.0,
+    "is_decision": true,
+    "candidate_id": "P1",
+    "candidate_name": "MacBook",
+    "min_confidence_at_decision": 0.75,
+    "max_confidence_runner_up": 0.4,
+    "reasons_includes_any_of": [
+      "Email matched calendar metadata",
+      "Answered",
+      "Speaking pattern"
+    ]
+  }
+}

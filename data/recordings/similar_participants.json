@@ -1,0 +1,252 @@
+{
+  "version": "1.0.0",
+  "scenario_id": "similar_participants",
+  "platform": "mock",
+  "session": {
+    "session_id": "mock-sess-003",
+    "platform": "mock",
+    "start_wall_clock": "2026-07-09T10:30:00Z",
+    "expected_duration_min": 30,
+    "expected_participants": [
+      "P1",
+      "P2",
+      "P3"
+    ],
+    "ground_truth_candidate_id": "P1",
+    "notes": "Similar-participants scenario (PDF p1 'two similar participants'): P1 and P2 both join as 'Ashwini Kumar' (homograph, no emails). Name/email signals cannot distinguish — only behavioral signals (transcript-role + speaking-pattern) can."
+  },
+  "metadata": {
+    "candidate": {
+      "name": "Ashwini Kumar",
+      "email": null
+    },
+    "interviewers": [
+      {
+        "name": "Priya Sharma",
+        "email": "priya@acme.corp"
+      }
+    ],
+    "schedule": {
+      "start_wall_clock": "2026-07-09T10:30:00Z",
+      "expected_duration_min": 30,
+      "calendar_invite_id": "evt_mock_3"
+    }
+  },
+  "participants": [
+    {
+      "participant_id": "P1",
+      "display_name": "Ashwini Kumar",
+      "email": null,
+      "device_name": null,
+      "join_order": 1,
+      "join_ts": 1.1,
+      "leave_ts": 1800.0
+    },
+    {
+      "participant_id": "P2",
+      "display_name": "Ashwini Kumar",
+      "email": null,
+      "device_name": null,
+      "join_order": 2,
+      "join_ts": 3.0,
+      "leave_ts": 1800.0
+    },
+    {
+      "participant_id": "P3",
+      "display_name": "Priya Sharma",
+      "email": "priya@acme.corp",
+      "device_name": null,
+      "join_order": 3,
+      "join_ts": 30.0,
+      "leave_ts": 1800.0
+    }
+  ],
+  "events": [
+    {
+      "type": "PARTICIPANT_JOINED",
+      "ts": 1.1,
+      "payload": {
+        "participant_id": "P1",
+        "display_name": "Ashwini Kumar",
+        "email": null,
+        "device_name": null,
+        "join_order": 1
+      }
+    },
+    {
+      "type": "WEBCAM_ON",
+      "ts": 2.0,
+      "payload": {
+        "participant_id": "P1"
+      }
+    },
+    {
+      "type": "PARTICIPANT_JOINED",
+      "ts": 3.0,
+      "payload": {
+        "participant_id": "P2",
+        "display_name": "Ashwini Kumar",
+        "email": null,
+        "device_name": null,
+        "join_order": 2
+      }
+    },
+    {
+      "type": "WEBCAM_ON",
+      "ts": 4.0,
+      "payload": {
+        "participant_id": "P2"
+      }
+    },
+    {
+      "type": "PARTICIPANT_JOINED",
+      "ts": 30.0,
+      "payload": {
+        "participant_id": "P3",
+        "display_name": "Priya Sharma",
+        "email": "priya@acme.corp",
+        "device_name": null,
+        "join_order": 3
+      }
+    },
+    {
+      "type": "WEBCAM_ON",
+      "ts": 30.5,
+      "payload": {
+        "participant_id": "P3"
+      }
+    },
+    {
+      "type": "SCREEN_SHARE_START",
+      "ts": 95.0,
+      "payload": {
+        "participant_id": "P1",
+        "content_label": "code editor / IDE"
+      }
+    },
+    {
+      "type": "SCREEN_SHARE_STOP",
+      "ts": 175.0,
+      "payload": {
+        "participant_id": "P1"
+      }
+    },
+    {
+      "type": "PARTICIPANT_LEFT",
+      "ts": 1800.0,
+      "payload": {
+        "participant_id": "P1",
+        "leave_ts": 1800.0
+      }
+    },
+    {
+      "type": "PARTICIPANT_LEFT",
+      "ts": 1800.0,
+      "payload": {
+        "participant_id": "P2",
+        "leave_ts": 1800.0
+      }
+    },
+    {
+      "type": "PARTICIPANT_LEFT",
+      "ts": 1800.0,
+      "payload": {
+        "participant_id": "P3",
+        "leave_ts": 1800.0
+      }
+    }
+  ],
+  "transcript_segments": [
+    {
+      "participant_id": "P3",
+      "text": "Welcome both! Let's get started.",
+      "start_sec": 65.0,
+      "end_sec": 68.0
+    },
+    {
+      "participant_id": "P3",
+      "text": "P1, can you walk me through your project?",
+      "start_sec": 70.0,
+      "end_sec": 73.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "I built Astra, a document index. Latency p95 under 400ms on a 50k-batch corpus.",
+      "start_sec": 75.0,
+      "end_sec": 95.0
+    },
+    {
+      "participant_id": "P3",
+      "text": "Tell me about the indexing strategy you used.",
+      "start_sec": 100.0,
+      "end_sec": 103.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "Hybrid BM25 + dense vectors, fresh snapshots every minute via log tailing.",
+      "start_sec": 104.0,
+      "end_sec": 130.0
+    },
+    {
+      "participant_id": "P3",
+      "text": "P2, I'll come to you in a moment. P1 — what was the hardest bug you hit on Astra?",
+      "start_sec": 135.0,
+      "end_sec": 140.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "A subtle ordering bug at the snapshot seam — readers saw a half-committed index. Fixed with an atomic swap pointer.",
+      "start_sec": 142.0,
+      "end_sec": 168.0
+    },
+    {
+      "participant_id": "P2",
+      "text": "Sorry, what's Astra?",
+      "start_sec": 175.0,
+      "end_sec": 178.0
+    },
+    {
+      "participant_id": "P3",
+      "text": "Let's move on. P1, why are you looking to leave your current role?",
+      "start_sec": 185.0,
+      "end_sec": 189.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "I want more end-to-end ownership over the system, not just the retrieval shard.",
+      "start_sec": 190.0,
+      "end_sec": 210.0
+    },
+    {
+      "participant_id": "P3",
+      "text": "Any questions for me?",
+      "start_sec": 230.0,
+      "end_sec": 232.0
+    },
+    {
+      "participant_id": "P1",
+      "text": "Yes — what does the on-call rotation look like here?",
+      "start_sec": 233.0,
+      "end_sec": 237.0
+    },
+    {
+      "participant_id": "P3",
+      "text": "One week every six weeks.",
+      "start_sec": 239.0,
+      "end_sec": 242.0
+    }
+  ],
+  "expected_output": {
+    "decision_ts": 250.0,
+    "is_decision": true,
+    "candidate_id": "P1",
+    "candidate_name": "Ashwini Kumar",
+    "min_confidence_at_decision": 0.65,
+    "max_confidence_runner_up": 0.65,
+    "reasons_includes_any_of": [
+      "Answered",
+      "Speaking pattern",
+      "Transcript role"
+    ]
+  }
+}

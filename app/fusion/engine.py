@@ -53,6 +53,85 @@ def fuse(evidences: list[Evidence], t: float) -> float:
     return numerator / denominator
 
 
+def _gate_no_participants(
+    session_id: str, platform: str, t: float
+) -> Verdict:
+    return Verdict(
+        session_id=session_id,
+        ts=t,
+        platform=platform,
+        candidate_id=None,
+        candidate_name=None,
+        confidence=None,
+        runner_up_id=None,
+        runner_up_confidence=None,
+        margin=None,
+        reasons=["no participants yet"],
+        is_decision=False,
+        not_deciding_reason="no participants",
+        analyzer_count=0,
+        total_evidence=0,
+    )
+
+
+def _gate_below_threshold(
+    session_id: str,
+    platform: str,
+    t: float,
+    top: ParticipantState,
+    runner: ParticipantState | None,
+    provisional_reasons: list[str],
+    analyzer_count: int,
+    total_evidence: int,
+    threshold: float,
+) -> Verdict:
+    return Verdict(
+        session_id=session_id,
+        ts=t,
+        platform=platform,
+        candidate_id=None,
+        candidate_name=None,
+        confidence=None,
+        runner_up_id=runner.participant_id if runner else None,
+        runner_up_confidence=runner.confidence if runner else None,
+        margin=None,
+        reasons=provisional_reasons,
+        is_decision=False,
+        not_deciding_reason=f"top confidence {top.confidence:.2f} < threshold {threshold}",
+        analyzer_count=analyzer_count,
+        total_evidence=total_evidence,
+    )
+
+
+def _gate_below_margin(
+    session_id: str,
+    platform: str,
+    t: float,
+    runner: ParticipantState,
+    provisional_reasons: list[str],
+    analyzer_count: int,
+    total_evidence: int,
+    observed_margin: float,
+    required_margin: float,
+) -> Verdict:
+    return Verdict(
+        session_id=session_id,
+        ts=t,
+        platform=platform,
+        candidate_id=None,
+        candidate_name=None,
+        confidence=None,
+        runner_up_id=runner.participant_id,
+        runner_up_confidence=runner.confidence,
+        margin=observed_margin,
+        reasons=provisional_reasons,
+        is_decision=False,
+        not_deciding_reason=f"margin {observed_margin:.2f} < required {required_margin}",
+        analyzer_count=analyzer_count,
+        total_evidence=total_evidence,
+    )
+
+
 def decide(
     session_id: str,
     platform: str,
@@ -61,18 +140,24 @@ def decide(
     explainer: Explainer,
     threshold: float = _DEFAULT_THRESHOLD,
     margin: float = _DEFAULT_MARGIN,
+    min_participants: int = 1,
 ) -> Verdict:
     """The threshold+margin gate per docs/DATA_CONTRACT.md §5.2.
 
-    Answers "who" only -- reason/rejected-hypothesis formatting ("why") is
-    delegated to the injected `explainer`, kept as a separate, independently
-    testable concern rather than inlined here.
+    ``min_participants`` — don't commit to a decision until at least this many
+    participants are present.  When the expected roster size is known (from
+    ``SessionEnvelope.expected_participants``) callers should pass that count
+    so the engine waits for the full room before trying to rank candidates.
+    Default 1 preserves backward-compatibility for callers that don't know.
     """
     all_evidence = [e for s in states for e in s.raw_evidence]
     analyzer_count = len({e.source for e in all_evidence})
     total_evidence = len(all_evidence)
 
     if not states:
+        return _gate_no_participants(session_id, platform, t)
+
+    if len(states) < min_participants:
         return Verdict(
             session_id=session_id,
             ts=t,
@@ -83,11 +168,14 @@ def decide(
             runner_up_id=None,
             runner_up_confidence=None,
             margin=None,
-            reasons=["no participants yet"],
+            reasons=[],
             is_decision=False,
-            not_deciding_reason="no participants",
-            analyzer_count=0,
-            total_evidence=0,
+            not_deciding_reason=(
+                f"waiting for participants: {len(states)} present, "
+                f"{min_participants} expected"
+            ),
+            analyzer_count=analyzer_count,
+            total_evidence=total_evidence,
         )
 
     sorted_states = sorted(states, key=lambda s: s.confidence, reverse=True)
@@ -98,40 +186,16 @@ def decide(
     ]
 
     if top.confidence < threshold:
-        return Verdict(
-            session_id=session_id,
-            ts=t,
-            platform=platform,
-            candidate_id=None,
-            candidate_name=None,
-            confidence=None,
-            runner_up_id=runner.participant_id if runner else None,
-            runner_up_confidence=runner.confidence if runner else None,
-            margin=None,
-            reasons=provisional_reasons,
-            is_decision=False,
-            not_deciding_reason=f"top confidence {top.confidence:.2f} < threshold {threshold}",
-            analyzer_count=analyzer_count,
-            total_evidence=total_evidence,
+        return _gate_below_threshold(
+            session_id, platform, t, top, runner, provisional_reasons,
+            analyzer_count, total_evidence, threshold,
         )
 
     observed_margin = top.confidence - runner.confidence if runner is not None else top.confidence
     if runner is not None and observed_margin < margin:
-        return Verdict(
-            session_id=session_id,
-            ts=t,
-            platform=platform,
-            candidate_id=None,
-            candidate_name=None,
-            confidence=None,
-            runner_up_id=runner.participant_id,
-            runner_up_confidence=runner.confidence,
-            margin=observed_margin,
-            reasons=provisional_reasons,
-            is_decision=False,
-            not_deciding_reason=f"margin {observed_margin:.2f} < required {margin}",
-            analyzer_count=analyzer_count,
-            total_evidence=total_evidence,
+        return _gate_below_margin(
+            session_id, platform, t, runner, provisional_reasons,
+            analyzer_count, total_evidence, observed_margin, margin,
         )
 
     reasons, rejected_hypotheses = explainer.render(top, runner)

@@ -1,28 +1,156 @@
-"""FastAPI entrypoint — session bootstrap and CLI (--scenario) land in later phases."""
+"""FastAPI entrypoint."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-from app.ingest.meet import MeetAdapter
-from app.ingest.zoom import ZoomAdapter, handle_url_validation, verify_webhook_signature
+from app.analyzers.transcript_role import LLMProvider, OpenAICompatibleProvider
+from app.api import routes
+from app.api.websocket import make_router
+from app.config import load_weights
+from app.harness.scripted_llm import ScriptedLLMProvider
+from app.ingest.meet import FasterWhisperTranscriber, MeetAdapter
+from app.ingest.zoom import (
+    KeyringTokenStore,
+    ZoomAdapter,
+    ZoomAPIClient,
+    ZoomAuth,
+    handle_url_validation,
+    verify_webhook_signature,
+)
+from app.runtime.clock import RealClock
+from app.runtime.registry import AnalyzerRegistry
+from app.runtime.session_runner import run_session
+from app.schema import SessionEnvelope, Verdict
 from app.session import SessionManager
 
 app = FastAPI(title="cis")
-
-# Consolidated per-session state (Phase 8) -- replaces the separate
-# meet_adapters/zoom_adapters dicts from Phases 7a/7b. Populated by whoever
-# starts a session (out of scope here); tests populate it directly via
-# session_manager.create_session(...) + setting .ingest_adapter.
 session_manager = SessionManager()
 
+app.include_router(routes.router)
+app.include_router(make_router(session_manager))
 
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "healthy"}
+
+# ---------------------------------------------------------------------------
+# Session lifecycle — POST to start, DELETE to stop
+# ---------------------------------------------------------------------------
+
+
+class _SessionStartBody(BaseModel):
+    platform: Literal["zoom", "meet"]
+    expected_participants: list[str] = []
+    ground_truth_candidate_id: str | None = None
+    # LLM provider: real when llm_base_url or LLM_BASE_URL env var is set;
+    # falls back to ScriptedLLMProvider (offline/deterministic) otherwise.
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    redis_url: str | None = None
+
+
+def _make_llm_provider(body: _SessionStartBody) -> LLMProvider:
+    base_url = body.llm_base_url or os.environ.get("LLM_BASE_URL")
+    if base_url:
+        api_key = body.llm_api_key or os.environ.get("LLM_API_KEY", "")
+        model = body.llm_model or os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        return OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model)
+    return ScriptedLLMProvider()
+
+
+def _make_zoom_adapter() -> ZoomAdapter:
+    import httpx
+
+    http_client = httpx.AsyncClient()
+    auth = ZoomAuth(
+        client_id=os.environ.get("ZOOM_CLIENT_ID", ""),
+        client_secret=os.environ.get("ZOOM_CLIENT_SECRET", ""),
+        account_id=os.environ.get("ZOOM_ACCOUNT_ID", ""),
+        token_store=KeyringTokenStore(),
+        http_client=http_client,
+    )
+    api_client = ZoomAPIClient(auth=auth, http_client=http_client)
+    transcriber = FasterWhisperTranscriber(
+        model_size=os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+    )
+    return ZoomAdapter(api_client=api_client, transcriber=transcriber)
+
+
+def _make_meet_adapter() -> MeetAdapter:
+    transcriber = FasterWhisperTranscriber(
+        model_size=os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+    )
+    return MeetAdapter(transcriber=transcriber)
+
+
+@app.post("/sessions/{session_id}")
+async def start_session_endpoint(
+    session_id: str, body: _SessionStartBody
+) -> JSONResponse:
+    """Create and start a live session.
+
+    Constructs the full pipeline (adapter → registry → evidence store →
+    TickScheduler → run_session) and runs it as a background task that
+    fans verdicts into the WebSocket stream at ``/sessions/{id}/stream``.
+    """
+    if session_manager.get_session(session_id) is not None:
+        return JSONResponse({"error": "session already exists"}, status_code=409)
+
+    weights = load_weights()
+    redis_url = body.redis_url or os.environ.get("REDIS_URL")
+    session = session_manager.create_session(session_id, weights, redis_url=redis_url)
+
+    llm = _make_llm_provider(body)
+    analyzers = AnalyzerRegistry(weights).build(llm)
+
+    adapter = _make_zoom_adapter() if body.platform == "zoom" else _make_meet_adapter()
+    session.ingest_adapter = adapter
+
+    envelope = SessionEnvelope(
+        session_id=session_id,
+        platform=body.platform,
+        start_wall_clock=datetime.now(UTC).isoformat(),
+        expected_participants=body.expected_participants,
+        ground_truth_candidate_id=body.ground_truth_candidate_id,
+    )
+
+    async def _broadcast(verdict: Verdict) -> None:
+        await session_manager.broadcast_verdict(session_id, verdict)
+
+    task: asyncio.Task[list[Verdict]] = asyncio.create_task(
+        run_session(
+            adapter=adapter,
+            session_envelope=envelope,
+            platform=body.platform,
+            analyzers=analyzers,
+            weights=weights,
+            clock=RealClock(),
+            evidence_store=session.evidence_store,
+            state_store=session.state_store,
+            broadcast=_broadcast,
+        )
+    )
+    session.runner_task = task
+    return JSONResponse({"session_id": session_id, "status": "started"})
+
+
+@app.delete("/sessions/{session_id}")
+async def stop_session_endpoint(session_id: str) -> JSONResponse:
+    """Cancel and remove a live session."""
+    session = session_manager.get_session(session_id)
+    if session is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    task = session.runner_task
+    if task is not None and not task.done():
+        task.cancel()
+    session_manager.remove_session(session_id)
+    return JSONResponse({"session_id": session_id, "status": "stopped"})
 
 
 @app.websocket("/meet/{session_id}/capture")
@@ -98,30 +226,3 @@ async def zoom_webhook(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-@app.websocket("/sessions/{session_id}/stream")
-async def session_stream(websocket: WebSocket, session_id: str) -> None:
-    """Outbound verdict stream for the dashboard, per docs/ARCHITECTURE.md §1.8.
-
-    Verdicts arrive via SessionManager.broadcast_verdict (called by the
-    realtime ticker each tick) -- this route never reads anything meaningful
-    from the client, it just holds the connection open and pushes.
-    """
-    await websocket.accept()
-    session = session_manager.get_session(session_id)
-    if session is None:
-        await websocket.close(code=4404, reason="unknown session_id")
-        return
-
-    if session.latest_verdict is not None:
-        await websocket.send_json(session.latest_verdict.model_dump(mode="json"))
-    session_manager.add_subscriber(session_id, websocket)
-
-    try:
-        while True:
-            message = await websocket.receive()
-            if message.get("type") == "websocket.disconnect":
-                break
-    except WebSocketDisconnect:
-        pass
-    finally:
-        session_manager.remove_subscriber(session_id, websocket)

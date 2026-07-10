@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "precision_at_1": 1.0,
+  "time_to_decision_p50": 95.0,
+  "time_to_decision_p90": 175.0,
+  "flips_mean": 0.0,
+  "scenarios": [
+    {
+      "scenario_id": "happy_path",
+      "precision_at_1": 1.0,
+      "time_to_decision": 30.4,
+      "flips": 0,
+      "runner_up_confidence": 0.1
+    },
+    {
+      "scenario_id": "renamed_candidate",
+      "precision_at_1": 1.0,
+      "time_to_decision": 95.0,
+      "flips": 0,
+      "runner_up_confidence": 0.06000000000000001
+    },
+    {
+      "scenario_id": "similar_participants",
+      "precision_at_1": 1.0,
+      "time_to_decision": 175.0,
+      "flips": 0,
+      "runner_up_confidence": 0.2916666666666667
+    }
+  ]
+}

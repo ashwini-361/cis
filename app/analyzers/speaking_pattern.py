@@ -173,7 +173,7 @@ class SpeakingPatternAnalyzer(Analyzer):
                 if score >= 0.5
                 else "Speaking pattern did not match candidate turn-taking",
                 ts=t,
-                expires_at=t + _EXPIRES_DELAY_SEC,
+                expires_at=None,  # sticky: interview-level turn-taking pattern is stable
                 supersedes="speaking_pattern",
             )
             for participant_id, score in scores.items()
