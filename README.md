@@ -274,13 +274,7 @@ Honest disclosure per PDF p3 spirit. Full details in [`docs/EVALUATION.md §7`](
 
 ---
 
-## Submission
 
-To send to Sherlock:
-```
-To: priya@sherlock.sh
-Subject: Sherlock Internship Challenge — {Your Name}
-```
 Template in [`docs/EVALUATION.md §11`](./docs/EVALUATION.md).
 
 ---
